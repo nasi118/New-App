@@ -1,0 +1,8 @@
+{
+  "name": "Tax Planning Workbench",
+  "description": "Deterministic federal individual income tax planning engine for TY2025 and TY2026 with SE tax, retirement plan design, MAGI phase-outs, and Sec. 199A QBI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
