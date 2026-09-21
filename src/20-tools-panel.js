@@ -74,12 +74,12 @@ function QuickCalc({ onAddNote }) {
     const v = cur();
     if (acc != null && op && !fresh) {
       const r = apply(acc, op, v);
-      setTape(t => [...t, { txt: usdc(v) + " " + o, cls: "" }]);
+      setTape(t => [...t, { id: Math.random().toString(36).slice(2), txt: usdc(v) + " " + o, cls: "" }]);
       setAcc(r);
       setDisp(String(Math.round(r * 100) / 100));
     } else {
       setAcc(v);
-      setTape(t => [...t, { txt: usdc(v) + " " + o, cls: "" }]);
+      setTape(t => [...t, { id: Math.random().toString(36).slice(2), txt: usdc(v) + " " + o, cls: "" }]);
     }
     setOp(o);
     setFresh(true);
@@ -88,7 +88,7 @@ function QuickCalc({ onAddNote }) {
     if (acc == null || !op) return;
     const v = cur();
     const r = apply(acc, op, v);
-    setTape(t => [...t, { txt: usdc(v), cls: "" }, { txt: usdc(r), cls: "total" }]);
+    setTape(t => [...t, { id: Math.random().toString(36).slice(2), txt: usdc(v), cls: "" }, { id: Math.random().toString(36).slice(2), txt: usdc(r), cls: "total" }]);
     setDisp(String(Math.round(r * 100) / 100));
     setAcc(null);
     setOp(null);
@@ -144,9 +144,16 @@ function QuickCalc({ onAddNote }) {
   }, !tape.length ? EL("span", {
     className: "tp-tape-empty"
   }, "Tape is empty.") : tape.slice(-14).map((l, i) => EL("div", {
-    key: i,
-    className: "tp-tape-line " + l.cls
-  }, l.txt))), EL("div", {
+    key: l.id || i,
+    className: "tp-tape-line " + l.cls,
+    style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" }
+  }, EL("input", {
+    placeholder: "Add note...",
+    value: l.note || "",
+    onChange: e => setTape(tape.map(x => (x.id === l.id || (!x.id && tape.indexOf(x) === i)) ? { ...x, note: e.target.value } : x)),
+    style: { flex: 1, minWidth: 0, fontSize: "10px", background: "transparent", border: "none", borderBottom: l.note ? "none" : "1px dashed var(--line)", outline: "none", color: "var(--indigo)" },
+    onKeyDown: e => e.stopPropagation()
+  }), EL("span", { style: { whiteSpace: "nowrap" } }, l.txt)))), EL("div", {
     className: "tp-qcalc-disp"
   }, EL("span", null, acc != null && op ? usdc(acc) + " " + op : ""), EL("strong", null, disp)), EL("div", {
     className: "tp-qcalc-pad"
@@ -175,8 +182,8 @@ function QuickCalc({ onAddNote }) {
     className: "tp-mini",
     type: "button",
     onClick: () => {
-      setTape(t => [...t, { txt: "— saved to notes —", cls: "note" }]);
-      onAddNote("Calculator: " + tape.map(l => l.txt).join("  ") + (tape.length ? "  = " : "") + disp);
+      setTape(t => [...t, { id: Math.random().toString(36).slice(2), txt: "— saved to notes —", cls: "note" }]);
+      onAddNote("Calculator: " + tape.map(l => (l.note ? `[${l.note}] ` : "") + l.txt).join("  ") + (tape.length ? "  = " : "") + disp);
     }
   }, "Note"), EL("button", {
     className: "tp-mini",

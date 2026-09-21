@@ -203,6 +203,20 @@ function Dashboard({
     onClick: () => onTrace(k.trace, focus.s.id)
   }, "?")), EL("strong", null, k.value), EL("em", null, k.sub)))), EL(Section, {
     page: "dashboard",
+    id: "visual-comparison",
+    title: "Visual Comparison",
+    summary: "Projected tax liability across " + results.length + " scenario" + (results.length === 1 ? "" : "s"),
+    fullable: true
+  }, EL(D3TaxLiabilityComparisonChart, {
+    results,
+    bestId,
+    baseline,
+    focusId: focus.s.id,
+    onSelectScenario: setFocusId,
+    status,
+    year
+  })), EL(Section, {
+    page: "dashboard",
     id: "chart",
     title: "Scenario comparison",
     summary: results.length + " scenarios",

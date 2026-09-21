@@ -658,3 +658,482 @@ function RateCurve({
     stroke: "#cfd4da"
   }));
 }
+
+/* ============================================================================
+   D3 TAX LIABILITY COMPARISON BAR CHART
+   Visualizes projected federal tax liability across saved tax scenarios using D3.
+   ========================================================================== */
+function D3TaxLiabilityComparisonChart({
+  results,
+  bestId,
+  baseline,
+  focusId,
+  onSelectScenario,
+  status,
+  year
+}) {
+  const containerRef = useRef(null);
+  const svgRef = useRef(null);
+  const [dimensions, setDimensions] = useState({ width: 700, height: 260 });
+  const [mode, setMode] = useState("total");
+  const [sortBy, setSortBy] = useState("default");
+  const [tooltip, setTooltip] = useState(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const updateSize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        if (rect.width > 0) {
+          setDimensions(d => ({ ...d, width: rect.width }));
+        }
+      }
+    };
+    updateSize();
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0) {
+          setDimensions(d => ({ ...d, width: entry.contentRect.width }));
+        }
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const bestResult = results.find(x => x.s.id === bestId) || results[0];
+  const bestTax = bestResult ? bestResult.r.totalTax : 0;
+  const baselineResult = baseline ? (results.find(x => x.s.id === baseline.id) || results[0]) : results[0];
+  const baselineTax = baselineResult ? baselineResult.r.totalTax : 0;
+
+  const data = useMemo(() => {
+    const list = results.map(({ s, r }) => {
+      const inc = Math.round(clamp0(r.fedIncomeTax - r.creditsApplied));
+      const emp = Math.round(r.seTax + r.sCorpFICA + r.addlMedicare);
+      const niit = Math.round(r.niit);
+      return {
+        id: s.id,
+        name: s.name,
+        totalTax: Math.round(r.totalTax),
+        inc,
+        emp,
+        niit,
+        effectiveRate: r.effectiveRate,
+        taxableIncome: r.taxableIncome,
+        isBest: s.id === bestId,
+        isBaseline: baseline && s.id === baseline.id,
+        isFocused: s.id === focusId,
+        diffFromBest: Math.round(r.totalTax - bestTax),
+        diffFromBaseline: Math.round(r.totalTax - baselineTax)
+      };
+    });
+
+    if (sortBy === "lowest") {
+      list.sort((a, b) => a.totalTax - b.totalTax);
+    }
+    return list;
+  }, [results, bestId, baseline, focusId, bestTax, baselineTax, sortBy]);
+
+  const maxTax = Math.max(...data.map(d => d.totalTax), 0);
+  const minTax = Math.min(...data.map(d => d.totalTax), 0);
+  const taxSpread = maxTax - minTax;
+  const focusedItem = data.find(d => d.id === focusId) || data[0];
+
+  useEffect(() => {
+    if (!svgRef.current || !data.length) return;
+    const d3 = window.d3 || (typeof d3 !== "undefined" ? d3 : null);
+    if (!d3) return;
+
+    const width = dimensions.width || 700;
+    const height = 260;
+    const margin = { top: 38, right: 28, bottom: 50, left: 68 };
+    const innerWidth = Math.max(10, width - margin.left - margin.right);
+
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+
+    const xScale = d3.scaleBand()
+      .domain(data.map(d => d.id))
+      .range([margin.left, width - margin.right])
+      .padding(0.28);
+
+    const maxY = Math.max(1000, maxTax * 1.20);
+    const yScale = d3.scaleLinear()
+      .domain([0, maxY])
+      .nice()
+      .range([height - margin.bottom, margin.top]);
+
+    const yAxisGrid = d3.axisLeft(yScale)
+      .ticks(4)
+      .tickSize(-innerWidth)
+      .tickFormat("");
+
+    svg.append("g")
+      .attr("class", "tp-d3-grid")
+      .attr("transform", `translate(${margin.left}, 0)`)
+      .call(yAxisGrid)
+      .selectAll("line")
+      .attr("stroke", "#e2e8f0")
+      .attr("stroke-dasharray", "2 4");
+
+    const yAxis = d3.axisLeft(yScale)
+      .ticks(4)
+      .tickFormat(d => "$" + (d >= 1000 ? Math.round(d / 1000) + "k" : d));
+
+    const yAxisGroup = svg.append("g")
+      .attr("class", "tp-d3-axis")
+      .attr("transform", `translate(${margin.left}, 0)`)
+      .call(yAxis);
+
+    yAxisGroup.select(".domain").attr("stroke", "#cbd5e1");
+    yAxisGroup.selectAll(".tick line").attr("stroke", "#cbd5e1");
+    yAxisGroup.selectAll(".tick text")
+      .attr("fill", "var(--muted)")
+      .attr("font-size", "11px");
+
+    if (mode === "total") {
+      const barsGroup = svg.append("g").attr("class", "tp-d3-bars");
+
+      data.forEach(d => {
+        const bandwidth = xScale.bandwidth();
+        const barWidth = Math.min(84, bandwidth);
+        const barX = xScale(d.id) + (bandwidth - barWidth) / 2;
+        const barY = yScale(d.totalTax);
+        const barHeight = Math.max(2, (height - margin.bottom) - barY);
+
+        let fillColor = "#4f46e5";
+        if (d.isBest) fillColor = "#059669";
+        else if (d.isBaseline) fillColor = "#2563eb";
+
+        const bar = barsGroup.append("rect")
+          .attr("class", "tp-d3-bar")
+          .attr("x", barX)
+          .attr("y", barY)
+          .attr("width", barWidth)
+          .attr("height", barHeight)
+          .attr("rx", Math.min(5, barWidth / 4))
+          .attr("ry", Math.min(5, barWidth / 4))
+          .attr("fill", fillColor)
+          .attr("stroke", d.isFocused ? "var(--ink, #0f172a)" : (d.isBest ? "#047857" : "none"))
+          .attr("stroke-width", d.isFocused ? 2.5 : (d.isBest ? 1.5 : 0))
+          .attr("opacity", d.isFocused ? 1 : 0.9);
+
+        bar.on("mouseenter", (event) => {
+          bar.attr("opacity", 1).attr("filter", "brightness(1.08)");
+          const rect = containerRef.current.getBoundingClientRect();
+          setTooltip({
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+            d
+          });
+        })
+        .on("mousemove", (event) => {
+          const rect = containerRef.current.getBoundingClientRect();
+          setTooltip(t => t ? ({
+            ...t,
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top
+          }) : null);
+        })
+        .on("mouseleave", () => {
+          bar.attr("opacity", d.isFocused ? 1 : 0.9).attr("filter", "none");
+          setTooltip(null);
+        })
+        .on("click", () => {
+          if (onSelectScenario) onSelectScenario(d.id);
+        });
+
+        svg.append("text")
+          .attr("class", "tp-d3-val-label")
+          .attr("x", barX + barWidth / 2)
+          .attr("y", barY - 14)
+          .attr("text-anchor", "middle")
+          .text(usd$(d.totalTax));
+
+        let subText = "";
+        let subColor = "var(--muted)";
+        if (d.isBest) {
+          subText = "★ Lowest";
+          subColor = "#059669";
+        } else if (d.isBaseline) {
+          subText = "Baseline";
+          subColor = "#2563eb";
+        } else if (d.diffFromBest > 0) {
+          subText = `+${usd(d.diffFromBest)}`;
+        }
+
+        if (subText) {
+          svg.append("text")
+            .attr("class", "tp-d3-sub-label")
+            .attr("x", barX + barWidth / 2)
+            .attr("y", barY - 3)
+            .attr("text-anchor", "middle")
+            .attr("fill", subColor)
+            .attr("font-weight", d.isBest ? "700" : "500")
+            .text(subText);
+        }
+      });
+    } else {
+      const keys = ["inc", "emp", "niit"];
+      const colors = {
+        inc: "#1e40af",
+        emp: "#60a5fa",
+        niit: "#f59e0b"
+      };
+
+      const stackGen = d3.stack().keys(keys);
+      const series = stackGen(data);
+
+      series.forEach(layer => {
+        const color = colors[layer.key];
+        layer.forEach(segment => {
+          const d = segment.data;
+          const bandwidth = xScale.bandwidth();
+          const barWidth = Math.min(84, bandwidth);
+          const barX = xScale(d.id) + (bandwidth - barWidth) / 2;
+          const y0 = yScale(segment[0]);
+          const y1 = yScale(segment[1]);
+          const segHeight = Math.max(0, y0 - y1);
+
+          if (segHeight > 0) {
+            const seg = svg.append("rect")
+              .attr("class", "tp-d3-bar")
+              .attr("x", barX)
+              .attr("y", y1)
+              .attr("width", barWidth)
+              .attr("height", segHeight)
+              .attr("fill", color)
+              .attr("opacity", d.isFocused ? 1 : 0.88);
+
+            seg.on("mouseenter", (event) => {
+              seg.attr("opacity", 1).attr("filter", "brightness(1.1)");
+              const rect = containerRef.current.getBoundingClientRect();
+              setTooltip({
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top,
+                d,
+                layerKey: layer.key
+              });
+            })
+            .on("mousemove", (event) => {
+              const rect = containerRef.current.getBoundingClientRect();
+              setTooltip(t => t ? ({
+                ...t,
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top
+              }) : null);
+            })
+            .on("mouseleave", () => {
+              seg.attr("opacity", d.isFocused ? 1 : 0.88).attr("filter", "none");
+              setTooltip(null);
+            })
+            .on("click", () => {
+              if (onSelectScenario) onSelectScenario(d.id);
+            });
+          }
+        });
+      });
+
+      data.forEach(d => {
+        const bandwidth = xScale.bandwidth();
+        const barWidth = Math.min(84, bandwidth);
+        const barX = xScale(d.id) + (bandwidth - barWidth) / 2;
+        const barY = yScale(d.totalTax);
+
+        svg.append("text")
+          .attr("class", "tp-d3-val-label")
+          .attr("x", barX + barWidth / 2)
+          .attr("y", barY - 6)
+          .attr("text-anchor", "middle")
+          .text(usd$(d.totalTax));
+      });
+    }
+
+    data.forEach(d => {
+      const bandwidth = xScale.bandwidth();
+      const barWidth = Math.min(84, bandwidth);
+      const centerX = xScale(d.id) + (bandwidth - barWidth) / 2 + barWidth / 2;
+      const labelY = height - margin.bottom + 16;
+
+      const maxChars = Math.max(8, Math.floor(barWidth / 7));
+      const displayName = d.name.length > maxChars ? d.name.slice(0, maxChars - 1) + "…" : d.name;
+
+      const label = svg.append("text")
+        .attr("class", "tp-d3-axis-x")
+        .attr("x", centerX)
+        .attr("y", labelY)
+        .attr("text-anchor", "middle")
+        .attr("fill", d.isFocused ? "var(--ink, #0f172a)" : "var(--ink2, #334155)")
+        .attr("font-weight", d.isFocused ? "700" : "600")
+        .attr("cursor", "pointer")
+        .text((d.isBest ? "★ " : "") + displayName);
+
+      label.on("click", () => {
+        if (onSelectScenario) onSelectScenario(d.id);
+      });
+
+      svg.append("text")
+        .attr("x", centerX)
+        .attr("y", labelY + 14)
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--muted)")
+        .attr("font-size", "10px")
+        .text(pct(d.effectiveRate) + " eff.");
+    });
+
+    svg.append("line")
+      .attr("x1", margin.left)
+      .attr("x2", width - margin.right)
+      .attr("y1", height - margin.bottom)
+      .attr("y2", height - margin.bottom)
+      .attr("stroke", "#cbd5e1");
+
+  }, [data, dimensions, mode, onSelectScenario, maxTax]);
+
+  return /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-chart-wrap",
+    ref: containerRef
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-stat-strip"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-stat-item"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "tp-d3-stat-label"
+  }, "Lowest Projected Tax:"), /*#__PURE__*/React.createElement("span", {
+    className: "tp-d3-stat-val good"
+  }, "★ " + usd$(minTax), bestResult ? ` (${bestResult.s.name})` : "")), baseline && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-stat-div"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-stat-item"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "tp-d3-stat-label"
+  }, "Baseline Tax:"), /*#__PURE__*/React.createElement("span", {
+    className: "tp-d3-stat-val"
+  }, usd$(baselineTax)))), taxSpread > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-stat-div"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-stat-item"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "tp-d3-stat-label"
+  }, "Max Tax Spread:"), /*#__PURE__*/React.createElement("span", {
+    className: "tp-d3-stat-val good"
+  }, usd$(taxSpread)))), focusedItem && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-stat-div",
+    style: { marginLeft: "auto" }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-stat-item"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "tp-d3-stat-label"
+  }, "Active:"), /*#__PURE__*/React.createElement("strong", {
+    style: { color: "var(--indigo)" }
+  }, focusedItem.name), /*#__PURE__*/React.createElement("span", {
+    className: "tp-d3-stat-val"
+  }, usd$(focusedItem.totalTax))))), /*#__PURE__*/React.createElement("svg", {
+    ref: svgRef,
+    className: "tp-d3-svg",
+    height: 260
+  }), tooltip && /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip",
+    style: {
+      left: Math.max(120, Math.min(dimensions.width - 120, tooltip.x)),
+      top: Math.max(10, tooltip.y - 12)
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-head"
+  }, /*#__PURE__*/React.createElement("span", null, tooltip.d.name), tooltip.d.isBest && /*#__PURE__*/React.createElement("span", {
+    className: "tp-pill ok"
+  }, "★ Lowest Tax"), tooltip.d.isBaseline && !tooltip.d.isBest && /*#__PURE__*/React.createElement("span", {
+    className: "tp-pill"
+  }, "Baseline")), /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-row"
+  }, /*#__PURE__*/React.createElement("span", null, "Projected Total Tax:"), /*#__PURE__*/React.createElement("strong", {
+    style: { color: tooltip.d.isBest ? "var(--green)" : "var(--ink)" }
+  }, usd$(tooltip.d.totalTax))), /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-row"
+  }, /*#__PURE__*/React.createElement("span", null, "Effective Tax Rate:"), /*#__PURE__*/React.createElement("strong", null, pct(tooltip.d.effectiveRate))), /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-row"
+  }, /*#__PURE__*/React.createElement("span", null, "Federal Income Tax:"), /*#__PURE__*/React.createElement("span", null, usd$(tooltip.d.inc))), /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-row"
+  }, /*#__PURE__*/React.createElement("span", null, "Employment / SE Tax:"), /*#__PURE__*/React.createElement("span", null, usd$(tooltip.d.emp))), tooltip.d.niit > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-row"
+  }, /*#__PURE__*/React.createElement("span", null, "NIIT / Surtax:"), /*#__PURE__*/React.createElement("span", null, usd$(tooltip.d.niit))), baseline && !tooltip.d.isBaseline && /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-row"
+  }, /*#__PURE__*/React.createElement("span", null, "vs. Baseline:"), /*#__PURE__*/React.createElement("strong", {
+    style: { color: tooltip.d.diffFromBaseline < 0 ? "var(--green)" : "var(--red)" }
+  }, tooltip.d.diffFromBaseline < 0 ? `Saves ${usd$(-tooltip.d.diffFromBaseline)}` : `+${usd$(tooltip.d.diffFromBaseline)} tax`)), !tooltip.d.isBest && /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-row"
+  }, /*#__PURE__*/React.createElement("span", null, "vs. Lowest Option:"), /*#__PURE__*/React.createElement("span", {
+    style: { color: "var(--muted)" }
+  }, `+${usd$(tooltip.d.diffFromBest)}`)), /*#__PURE__*/React.createElement("div", {
+    className: "tp-d3-tooltip-note"
+  }, "Click bar to inspect in Form 1040 walk and planning tools")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: "12px",
+      marginTop: "12px",
+      paddingTop: "10px",
+      borderTop: "1px solid var(--line2)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tp-legend"
+  }, mode === "total" ? [
+    /*#__PURE__*/React.createElement("i", { key: "best" },
+      /*#__PURE__*/React.createElement("span", { className: "sw", style: { background: "#059669" } }),
+      " Lowest Tax Scenario"
+    ),
+    baseline && /*#__PURE__*/React.createElement("i", { key: "base" },
+      /*#__PURE__*/React.createElement("span", { className: "sw", style: { background: "#2563eb" } }),
+      " Baseline Scenario"
+    ),
+    /*#__PURE__*/React.createElement("i", { key: "alt" },
+      /*#__PURE__*/React.createElement("span", { className: "sw", style: { background: "#4f46e5" } }),
+      " Planning Scenarios"
+    ),
+    /*#__PURE__*/React.createElement("i", { key: "active" },
+      /*#__PURE__*/React.createElement("span", {
+        className: "sw",
+        style: {
+          background: "transparent",
+          border: "2px solid var(--ink, #0f172a)",
+          borderRadius: "3px"
+        }
+      }),
+      " Currently Active"
+    )
+  ] : [
+    /*#__PURE__*/React.createElement("i", { key: "inc" },
+      /*#__PURE__*/React.createElement("span", { className: "sw", style: { background: "#1e40af" } }),
+      " Income Tax"
+    ),
+    /*#__PURE__*/React.createElement("i", { key: "emp" },
+      /*#__PURE__*/React.createElement("span", { className: "sw", style: { background: "#60a5fa" } }),
+      " SE & Payroll Tax"
+    ),
+    /*#__PURE__*/React.createElement("i", { key: "niit" },
+      /*#__PURE__*/React.createElement("span", { className: "sw", style: { background: "#f59e0b" } }),
+      " NIIT / Surtaxes"
+    )
+  ]), /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: "8px", alignItems: "center" }
+  }, /*#__PURE__*/React.createElement(Seg, {
+    small: true,
+    value: mode,
+    onChange: setMode,
+    options: [
+      { v: "total", l: "Total Liability" },
+      { v: "breakdown", l: "Tax Components" }
+    ]
+  }), /*#__PURE__*/React.createElement(Seg, {
+    small: true,
+    value: sortBy,
+    onChange: setSortBy,
+    options: [
+      { v: "default", l: "Scenario Order" },
+      { v: "lowest", l: "Lowest Tax First" }
+    ]
+  }))));
+}
+

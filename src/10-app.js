@@ -1413,7 +1413,7 @@ function App() {
               type: "button",
               onClick: () => {
                 const isDark = APPEARANCE_THEMES.find(th => th.id === apEff.theme)?.dark;
-                setAppearance({ ...appearance, theme: isDark ? "classic" : "midnight" });
+                setAppearance({ ...appearance, theme: isDark ? "classic" : "dark" });
               },
               title: "Toggle dark mode"
             }, APPEARANCE_THEMES.find(th => th.id === apEff.theme)?.dark ? "☀️" : "🌙"),

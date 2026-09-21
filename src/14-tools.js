@@ -288,7 +288,7 @@ function Calculator({
     return () => window.removeEventListener("keydown", onKey);
   });
   const grabs = result ? [["AGI", result.agi], ["Taxable income", result.taxableIncome], ["Total modeled federal tax", result.totalTax], ["Marginal rate", result.marginal], ["Sch C net", result.schedC], ["SE tax", result.seTax]].filter(g => g[1] !== 0) : [];
-  const tapeText = () => tape.map(t => t.text).join("\n");
+  const tapeText = () => tape.map(t => (t.note ? `[${t.note}] ` : "") + t.text).join("\n");
   return /*#__PURE__*/React.createElement(ToolWindow, {
     title: "Calculator",
     sub: scenarioName,
@@ -315,8 +315,15 @@ function Calculator({
     className: "tp-tape-empty"
   }, "Tape is empty. Every entry is recorded here."), tape.map(t => /*#__PURE__*/React.createElement("div", {
     key: t.id,
-    className: "tp-tape-line " + t.kind
-  }, t.text))), /*#__PURE__*/React.createElement("div", {
+    className: "tp-tape-line " + t.kind,
+    style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" }
+  }, /*#__PURE__*/React.createElement("input", {
+    placeholder: "Add note...",
+    value: t.note || "",
+    onChange: e => setTape(tape.map(x => x.id === t.id ? { ...x, note: e.target.value } : x)),
+    style: { flex: 1, minWidth: 0, fontSize: "10px", background: "transparent", border: "none", borderBottom: t.note ? "none" : "1px dashed var(--line)", outline: "none", color: "var(--indigo)" },
+    onKeyDown: e => e.stopPropagation()
+  }), /*#__PURE__*/React.createElement("span", { style: { whiteSpace: "nowrap" } }, t.text)))), /*#__PURE__*/React.createElement("div", {
     className: "tp-calc-pad"
   }, /*#__PURE__*/React.createElement(K, {
     l: "C",
