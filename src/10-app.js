@@ -94,6 +94,31 @@ function ReportPage({
       flash("Download blocked in this view. Try Print instead.");
     }
   };
+  const [driveSaving, setDriveSaving] = useState(false);
+  const doSaveToDrive = async () => {
+    const token = typeof getDriveAccessToken === "function" ? await getDriveAccessToken() : null;
+    if (!token) {
+      flash("Please connect your Google Drive account first via the Google Drive tab.");
+      return;
+    }
+    setDriveSaving(true);
+    try {
+      const rootFolder = await driveFindOrCreateFolder("AI Tax Strategy Advisors");
+      const clientFolder = await driveFindOrCreateFolder((client || "Client") + " — TY" + year, rootFolder.id);
+      const fileName = (client || "Tax_Planning_Report").replace(/[^\w-]+/g, "_") + "_" + year + ".html";
+      await driveUploadFile({
+        name: fileName,
+        mimeType: "text/html",
+        content: buildHTML(),
+        parentId: clientFolder.id
+      });
+      flash("Saved report to Google Drive in folder '" + clientFolder.name + "'!");
+    } catch (e) {
+      flash("Error saving to Drive: " + e.message);
+    } finally {
+      setDriveSaving(false);
+    }
+  };
   return /*#__PURE__*/React.createElement("div", {
     className: "tp-stack"
   }, /*#__PURE__*/React.createElement(Card, {
@@ -149,7 +174,11 @@ function ReportPage({
   }, I.print, " Print or save as PDF"), /*#__PURE__*/React.createElement("button", {
     className: "tp-btn ghost",
     onClick: doDownload
-  }, I.download, " Download HTML"), msg && /*#__PURE__*/React.createElement("span", {
+  }, I.download, " Download HTML"), /*#__PURE__*/React.createElement("button", {
+    className: "tp-btn ghost",
+    disabled: driveSaving,
+    onClick: doSaveToDrive
+  }, I.drive, driveSaving ? " Saving to Drive…" : " Save to Google Drive"), msg && /*#__PURE__*/React.createElement("span", {
     className: "tp-rp-msg"
   }, msg))), /*#__PURE__*/React.createElement("div", {
     className: "tp-rp-page"
@@ -503,6 +532,21 @@ const TABS = [{
   label: "AI Analysis",
   icon: I.chat,
   blurb: "Central AI advisory workspace — planning questions, optimization history, and saved analyses. The engine stays authoritative."
+}, {
+  id: "presentation",
+  label: "Presentation Demo",
+  icon: I.presentation,
+  blurb: "Interactive slide presentation, real-time strategy simulation, and guided platform tour."
+}, {
+  id: "drive",
+  label: "Google Drive",
+  icon: I.drive,
+  blurb: "Google Drive workspace integration — browse client tax files, back up scenarios, and export reports directly to Drive."
+}, {
+  id: "sheets",
+  label: "Google Sheets",
+  icon: I.sheets,
+  blurb: "Google Sheets workspace integration — create live multi-scenario tax workbooks, inspect client spreadsheets, and sync calculations."
 }];
 
 /* Grouped navigation: Planning / Calculations / Administration.
@@ -510,7 +554,7 @@ const TABS = [{
 const NAV_GROUPS = [{
   key: "planning",
   label: "Planning",
-  ids: ["dashboard", "clients", "scenarios", "ai", "guide", "report"]
+  ids: ["dashboard", "clients", "scenarios", "presentation", "ai", "guide", "report"]
 }, {
   key: "calc",
   label: "Calculations",
@@ -518,7 +562,7 @@ const NAV_GROUPS = [{
 }, {
   key: "admin",
   label: "Administration",
-  ids: ["audit", "data", "reference"]
+  ids: ["audit", "data", "drive", "sheets", "reference"]
 }];
 function App() {
   /* ---- Clients own their scenarios, tax year and filing status. Client
@@ -838,6 +882,10 @@ function App() {
   }));
   const [showOptimize, setShowOptimize] = useState(false);
   const [showAIReport, setShowAIReport] = useState(false);
+  const [sheetsExportConfig, setSheetsExportConfig] = useState(null); // { mode: "current" | "all", scenarioId: string }
+  const openSheetsExport = (mode = "current", scenarioId = null) => {
+    setSheetsExportConfig({ mode, scenarioId: scenarioId || activeIdSafe });
+  };
   /* AI Optimize / test scenarios: clone the starting scenario, apply ONLY the
      whitelisted approved input changes, let the engine recompute, and record
      everything. AI-created scenarios are always identified as such. */
@@ -1389,6 +1437,18 @@ function App() {
               "aria-label": "Search and commands"
             }, "⌕ Search"),
             EL("button", {
+              className: "tp-btn ghost sm tp-demo-launch-btn",
+              type: "button",
+              onClick: () => setTab("presentation"),
+              title: "Open interactive platform presentation demo"
+            }, "📽 Demo"),
+            EL("button", {
+              className: "tp-btn ghost sm",
+              type: "button",
+              onClick: () => setTab("drive"),
+              title: "Open Google Drive workspace (browse files, backup, export reports)"
+            }, I.drive, " Drive"),
+            EL("button", {
               className: "tp-btn ghost sm tp-popout-tab",
               type: "button",
               onClick: () => wbOpenNewTab(tab, clientId),
@@ -1436,7 +1496,7 @@ function App() {
           recalcState && recalcState.reported && EL("span", {
             className: recalcState.ok ? "tp-calcid-ok" : "tp-calcid-bad"
           }, recalcState.ok ? "Recalculated \u2713 (" + recalcState.scope + ")" : "Recalculation found failures (" + recalcState.scope + ")")),
-        validation.all.length > 0 && EL("div", { className: "tp-validbar" },
+        tab !== "scenarios" && validation.all.length > 0 && EL("div", { className: "tp-validbar" },
           EL("strong", null, active.name, ": "),
           validation.errors.map((v, i) => EL("span", { key: "e" + i, className: "tp-vchip err" }, "Blocking: ", v.msg)),
           validation.warnings.map((v, i) => EL("span", { key: "w" + i, className: "tp-vchip warn" }, v.msg)),
@@ -1468,11 +1528,13 @@ function App() {
           onAIOptimize: () => setShowOptimize(true),
           onAIReport: () => setShowAIReport(true),
           onAskAI: askWorkspace,
+          onOpenSheetsExport: (mode, scenId) => openSheetsExport(mode, scenId),
           client: clientSafe, alignments,
           scenarios, results, bestId, baseline, status, year,
           update, addScenario, duplicate, remove, reset,
           activeId: activeIdSafe, onAddPlanningScenario: addPlanningScenario,
-          onModelStrategy: modelStrategy
+          onModelStrategy: modelStrategy,
+          goto: setTab
         }),
         tab === "se" && EL(SEModule, { scenario: active, result: activeResult, status, year, update: updateActive }),
         tab === "magi" && EL(MAGIModule, { scenario: active, result: activeResult, status, year, update: updateActive }),
@@ -1485,9 +1547,55 @@ function App() {
           scenarios, setScenarios: setScenariosLogged, results, status, year,
           auditLog: clientAudit, setAuditLog: setClientAudit, notes, setNotes, logEvent, setYear: setYearLogged, setStatus: setStatusLogged,
           restoreSession: restoreClientSession,
-          clientRecord: clientSafe
+          clientRecord: clientSafe,
+          onOpenSheetsExport: (mode, scenId) => openSheetsExport(mode, scenId),
+          goto: setTab
         }),
         tab === "report" && EL(ReportPage, { client: clientSafe, alignments, results, bestId, baseline, status, year, notes, auditLog: clientAudit }),
+        tab === "presentation" && EL(PresentationDemoPage, {
+          goto: setTab,
+          client: clientSafe,
+          scenarios,
+          results,
+          bestId,
+          baseline,
+          status,
+          year,
+          setActiveId,
+          setFocusId,
+          onAddModelScenario: (s) => {
+            logEvent({ label: "Scenario created from Presentation Demo", kind: "structure", scenarioName: s.name, to: s.name });
+            setScenarios(sc => [...sc, s]);
+            setActiveId(s.id);
+            setFocusId(s.id);
+            setTab("scenarios");
+          }
+        }),
+        tab === "drive" && EL(GoogleDrivePage, {
+          client: clientSafe,
+          scenarios,
+          results,
+          bestId,
+          baseline,
+          status,
+          year,
+          auditLog: clientAudit,
+          notes,
+          goto: setTab
+        }),
+        tab === "sheets" && EL(GoogleSheetsPage, {
+          client: clientSafe,
+          scenarios,
+          results,
+          bestId,
+          baseline,
+          status,
+          year,
+          auditLog: clientAudit,
+          notes,
+          goto: setTab,
+          onOpenExport: (mode, scenId) => openSheetsExport(mode, scenId)
+        }),
         tab === "ai" && EL(AIAnalysisPage, {
           results, status, year, activeIdx,
           aiPrefill, clearPrefill: () => setAiPrefill(null),
@@ -1533,7 +1641,8 @@ function App() {
             active, result: activeResult, validation, status, year,
             onOpenCalc: id => { setOpenCalc(id); setUIPref("lastTool", id); },
             onGotoScenarios: () => setTab("scenarios"),
-            onAddNote: addQuickNote
+            onAddNote: addQuickNote,
+            onOpenSheetsExport: (mode, scenId) => openSheetsExport(mode, scenId)
           }))),
 
     /* ---------------- Dock, floating tools, drawers ---------------- */
@@ -1593,6 +1702,22 @@ function App() {
     showAIReport && EL(AIReportPanel, {
       onClose: () => setShowAIReport(false),
       results, status, year, reportInbox, logEvent
+    }),
+    sheetsExportConfig && EL(GoogleSheetsExportModal, {
+      open: !!sheetsExportConfig,
+      onClose: () => setSheetsExportConfig(null),
+      client: clientSafe,
+      scenarios,
+      results,
+      status,
+      year,
+      bestId,
+      baseline,
+      auditLog: clientAudit,
+      notes,
+      targetScenarioId: sheetsExportConfig.scenarioId || activeIdSafe,
+      initialMode: sheetsExportConfig.mode || "current",
+      logEvent
     }),
     showAI && EL(AIReviewer, {
       onClose: () => setShowAI(false),

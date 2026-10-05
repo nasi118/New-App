@@ -20,7 +20,7 @@ for (const f of files) {
 /* Top-level const/let live in the context's global lexical scope, not on the
    context object — pull the bindings out with one evaluated expression. */
 const E = vm.runInContext(
-  "({ TY, schedATotal, computeSchedule1A, computeStudentLoanInterest, computeSCorp, computeQBI, computeScenario, validateScenario, analyzeScenario, computeEstimatedTax, seed: seed() })",
+  "({ TY, schedATotal, computeSchedule1A, computeStudentLoanInterest, computeSCorp, computeQBI, computeScenario, validateScenario, auditLedgerValidation, analyzeScenario, computeEstimatedTax, seed: seed() })",
   ctx
 );
 
@@ -239,6 +239,43 @@ function check(name, actual, expected, tol = 0.51) {
   // Balance at filing is independent of the safe-harbor amount
   r = E.computeEstimatedTax({ currentYearTax: 50000, priorYearTax: null, priorYearAGI: null, status: "mfj", C, withholding: 55000, paymentsMade: [], asOfDate: "2026-12-01" });
   check("Estimated tax: projected balance is current tax minus total applied (refund)", r.projectedBalance, -5000);
+}
+
+/* ------------------------------------------- 10b. Ledger validation audit */
+{
+  const sClean = { id: "s1", name: "Clean MFJ", w2Wages: 150000 };
+  const rClean = E.computeScenario(sClean, "mfj", 2026);
+  const auditClean = E.auditLedgerValidation([sClean], [{ s: sClean, r: rClean }], { name: "Client", missingFacts: [] }, "mfj", 2026);
+  check("Ledger audit: clean scenario produces zero blocking errors", auditClean.errorsCount, 0);
+  check("Ledger audit: clean scenario is clean", auditClean.isClean, true);
+
+  const sWithIssues = {
+    id: "s2",
+    name: "Scenario with Issues",
+    ordinaryDividends: 5000,
+    qualifiedDividends: 8000, // Error: qualified > ordinary
+    socialSecurityTotal: 30000,
+    socialSecurityTaxable: 28000, // Warning: > 85%
+    sCorps: {
+      entities: [
+        { id: "e1", name: "Acme Corp", profitBeforeComp: 100000, ownerComp: 0 } // Missing owner comp
+      ]
+    }
+  };
+  const rWithIssues = E.computeScenario(sWithIssues, "mfj", 2026);
+  const clientWithFacts = {
+    name: "Acme Client",
+    missingFacts: ["HDHP eligibility documentation", "Prior year tax return Form 1040"]
+  };
+  const auditIssues = E.auditLedgerValidation([sWithIssues], [{ s: sWithIssues, r: rWithIssues }], clientWithFacts, "mfj", 2026);
+
+  check("Ledger audit: aggregates blocking errors", auditIssues.errorsCount >= 1, true);
+  check("Ledger audit: identifies qual-div error", auditIssues.errors.some(e => e.code === "qual-div"), true);
+  check("Ledger audit: aggregates rule warnings", auditIssues.warningsCount >= 1, true);
+  check("Ledger audit: identifies ss-85 warning", auditIssues.warnings.some(w => w.code === "ss-85"), true);
+  check("Ledger audit: detects missing S-Corp owner compensation", auditIssues.missing.some(m => m.code === "missing-scorp-comp"), true);
+  check("Ledger audit: aggregates client unconfirmed missing facts", auditIssues.missing.some(m => m.code === "client-fact"), true);
+  check("Ledger audit: hasBlocking flag set correctly", auditIssues.hasBlocking, true);
 }
 
 /* -------------------------------------------------- 11. Golden totals */

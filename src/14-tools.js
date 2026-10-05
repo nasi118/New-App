@@ -808,7 +808,9 @@ function DataPage({
   setYear,
   setStatus,
   clientRecord,
-  restoreSession
+  restoreSession,
+  onOpenSheetsExport,
+  goto
 }) {
   const [msg, setMsg] = useState(null);
   const [client, setClient] = useState(clientRecord ? clientRecord.name : "");
@@ -990,7 +992,21 @@ function DataPage({
     key: s[0]
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("strong", null, s[0])), /*#__PURE__*/React.createElement("td", {
     className: "sm"
-  }, s[1]))))))), /*#__PURE__*/React.createElement(Card, {
+  }, s[1]))))))), EL(Card, {
+    title: "Google Sheets Live Integration",
+    sub: "cloud synchronization (API v4)"
+  }, EL(Note, null, "Export all active client scenarios and Form 1040 line walks directly into a live, beautifully formatted Google Spreadsheet with currency formatting, percentage rates, and due diligence notes."), EL("div", {
+    className: "tp-rp-actions"
+  }, onOpenSheetsExport && EL("button", {
+    className: "tp-btn solid",
+    style: { background: "#047857", borderColor: "#047857" },
+    type: "button",
+    onClick: () => onOpenSheetsExport("current")
+  }, I.sheets, " Sync to Google Sheets"), goto && EL("button", {
+    className: "tp-btn ghost",
+    type: "button",
+    onClick: () => goto("sheets")
+  }, "Open Google Sheets Hub →"))), /*#__PURE__*/React.createElement(Card, {
     title: "Import"
   }, /*#__PURE__*/React.createElement(Note, null, "Import reads the ", /*#__PURE__*/React.createElement("strong", null, "Inputs"), " sheet, matching on the key column, so both a blank template and a full export round-trip. Add columns to the right for more scenarios. Blank cells are treated as zero."), /*#__PURE__*/React.createElement("div", {
     className: "tp-grid3"

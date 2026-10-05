@@ -34,6 +34,41 @@ function Icon({
   }, d);
 }
 const I = {
+  presentation: /*#__PURE__*/React.createElement(Icon, {
+    d: /*#__PURE__*/React.createElement(React.Fragment, null,
+      /*#__PURE__*/React.createElement("rect", { x: "2", y: "3", width: "20", height: "14", rx: "2" }),
+      /*#__PURE__*/React.createElement("line", { x1: "8", y1: "21", x2: "16", y2: "21" }),
+      /*#__PURE__*/React.createElement("line", { x1: "12", y1: "17", x2: "12", y2: "21" }),
+      /*#__PURE__*/React.createElement("path", { d: "m10 8 5 3-5 3v-6Z" })
+    )
+  }),
+  drive: /*#__PURE__*/React.createElement(Icon, {
+    d: /*#__PURE__*/React.createElement(React.Fragment, null,
+      /*#__PURE__*/React.createElement("path", { d: "M8.5 3.5h7l5.5 9.5-3.5 6-9-15.5Z" }),
+      /*#__PURE__*/React.createElement("path", { d: "M3 18.5h14l3.5-6h-14L3 18.5Z" }),
+      /*#__PURE__*/React.createElement("path", { d: "m6.5 6.5-3.5 6 7 12 3.5-6-7-12Z" })
+    )
+  }),
+  sheets: /*#__PURE__*/React.createElement(Icon, {
+    d: /*#__PURE__*/React.createElement(React.Fragment, null,
+      /*#__PURE__*/React.createElement("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }),
+      /*#__PURE__*/React.createElement("polyline", { points: "14 2 14 8 20 8" }),
+      /*#__PURE__*/React.createElement("line", { x1: "8", y1: "13", x2: "16", y2: "13" }),
+      /*#__PURE__*/React.createElement("line", { x1: "8", y1: "17", x2: "16", y2: "17" }),
+      /*#__PURE__*/React.createElement("line", { x1: "12", y1: "9", x2: "12", y2: "21" })
+    )
+  }),
+  play: /*#__PURE__*/React.createElement(Icon, {
+    d: /*#__PURE__*/React.createElement("polygon", { points: "5 3 19 12 5 21 5 3" })
+  }),
+  expand: /*#__PURE__*/React.createElement(Icon, {
+    d: /*#__PURE__*/React.createElement(React.Fragment, null,
+      /*#__PURE__*/React.createElement("polyline", { points: "15 3 21 3 21 9" }),
+      /*#__PURE__*/React.createElement("polyline", { points: "9 21 3 21 3 15" }),
+      /*#__PURE__*/React.createElement("line", { x1: "21", y1: "3", x2: "14", y2: "10" }),
+      /*#__PURE__*/React.createElement("line", { x1: "3", y1: "21", x2: "10", y2: "14" })
+    )
+  }),
   grid: /*#__PURE__*/React.createElement(Icon, {
     d: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("rect", {
       x: "3",

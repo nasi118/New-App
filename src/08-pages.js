@@ -516,6 +516,233 @@ function Dashboard({
 }
 
 /* ============================================================================
+   SCENARIO WORKSPACE VALIDATION STATUS BAR
+   Aggregates statutory tax rule warnings, blocking validation errors,
+   informational notices, and missing data points across the current ledger.
+   Provides direct drilldown navigation, filtering, and AI diagnostic actions.
+   ========================================================================== */
+function LedgerValidationStatusBar({
+  ledgerScenarios,
+  ledgerResults,
+  client,
+  status,
+  year,
+  setDrill,
+  setOpen,
+  onAskAI,
+  activeId,
+  goto
+}) {
+  const audit = useMemo(() => {
+    return auditLedgerValidation(ledgerScenarios, ledgerResults, client, status, year);
+  }, [ledgerScenarios, ledgerResults, client, status, year]);
+
+  const [expanded, setExpanded] = useUIPref("ledger:valbar:expanded", true);
+  const [kindFilter, setKindFilter] = useState("all");
+  const [scenarioFilter, setScenarioFilter] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const filteredItems = useMemo(() => {
+    return audit.items.filter(item => {
+      if (kindFilter !== "all" && item.kind !== kindFilter) return false;
+      if (scenarioFilter !== "all") {
+        if (scenarioFilter === "client" && item.scenarioId !== "client") return false;
+        if (scenarioFilter !== "client" && item.scenarioId !== scenarioFilter && (item.scenarioViewId || item.scenarioId) !== scenarioFilter) return false;
+      }
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const text = (item.title + " " + item.msg + " " + item.category + " " + (item.citation || "") + " " + item.scenarioName).toLowerCase();
+        if (!text.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [audit.items, kindFilter, scenarioFilter, search]);
+
+  const barStatusClass = audit.errorsCount > 0
+    ? "has-error"
+    : (audit.warningsCount > 0 ? "has-warn" : (audit.missingCount > 0 ? "has-missing" : "is-clean"));
+
+  const topIssue = audit.errors[0] || audit.warnings[0] || audit.missing[0] || audit.infos[0];
+
+  return EL("div", {
+    className: "tp-ws-valbar " + barStatusClass,
+    role: "region",
+    "aria-label": "Scenario workspace validation status bar"
+  },
+    EL("div", { className: "tp-ws-valbar-head" },
+      EL("div", { className: "tp-ws-valbar-summary" },
+        audit.isClean ? EL("span", { className: "tp-ws-val-badge clean" }, "✓ Clean") : (
+          EL(React.Fragment, null,
+            audit.errorsCount > 0 && EL("span", { className: "tp-ws-val-badge error", title: audit.errorsCount + " blocking validation errors" }, "🛑 " + audit.errorsCount + " Error" + (audit.errorsCount === 1 ? "" : "s")),
+            audit.warningsCount > 0 && EL("span", { className: "tp-ws-val-badge warn", title: audit.warningsCount + " statutory rule warnings" }, "⚠️ " + audit.warningsCount + " Rule Warning" + (audit.warningsCount === 1 ? "" : "s")),
+            audit.missingCount > 0 && EL("span", { className: "tp-ws-val-badge missing", title: audit.missingCount + " unconfirmed or missing data points" }, "📋 " + audit.missingCount + " Missing Data Point" + (audit.missingCount === 1 ? "" : "s")),
+            audit.infosCount > 0 && EL("span", { className: "tp-ws-val-badge info", title: audit.infosCount + " informational review points" }, "ℹ️ " + audit.infosCount + " Notice" + (audit.infosCount === 1 ? "" : "s"))
+          )
+        ),
+        EL("span", { className: "tp-ws-val-title" },
+          audit.isClean
+            ? "Current Ledger Validated — All Statutory Rules Satisfied"
+            : "Ledger Validation: " + (audit.errorsCount ? audit.errorsCount + " blocking error" + (audit.errorsCount === 1 ? "" : "s") + ", " : "") +
+              audit.warningsCount + " rule warning" + (audit.warningsCount === 1 ? "" : "s") + ", " +
+              audit.missingCount + " missing data point" + (audit.missingCount === 1 ? "" : "s") + " detected across active ledger"
+        ),
+        !expanded && topIssue && EL("span", {
+          className: "tp-ws-val-ticker",
+          title: topIssue.scenarioName + ": " + topIssue.title + " — " + topIssue.msg
+        },
+          EL("strong", null, topIssue.scenarioName + ":"), " ", topIssue.title
+        )
+      ),
+      EL("div", { className: "tp-ws-valbar-controls" },
+        audit.totalIssues > 0 && EL("select", {
+          className: "tp-select sm",
+          value: scenarioFilter,
+          onChange: e => setScenarioFilter(e.target.value),
+          "aria-label": "Filter issues by scenario"
+        },
+          EL("option", { value: "all" }, "All Scenarios (" + audit.totalIssues + ")"),
+          ledgerScenarios.map(s => {
+            const count = audit.items.filter(x => x.scenarioId === s.id || x.scenarioViewId === (s.viewId || s.id)).length;
+            return EL("option", { key: s.viewId || s.id, value: s.id }, s.name + (s.calcYear ? " '2" + String(s.calcYear).slice(2) : "") + " (" + count + ")");
+          }),
+          client && (client.missingFacts || []).length > 0 && EL("option", { value: "client" }, "Client File (" + audit.items.filter(x => x.scenarioId === "client").length + ")")
+        ),
+        audit.totalIssues > 0 && EL("button", {
+          className: "tp-btn ghost sm tp-ws-val-toggle",
+          type: "button",
+          onClick: () => setExpanded(!expanded),
+          "aria-expanded": expanded
+        }, expanded ? "▲ Hide Details" : "▼ Review Issues (" + audit.totalIssues + ")")
+      )
+    ),
+    expanded && audit.totalIssues > 0 && EL("div", { className: "tp-ws-valbar-body" },
+      EL("div", { className: "tp-ws-val-toolbar" },
+        EL("div", { className: "tp-ws-val-filters", role: "radiogroup", "aria-label": "Filter by issue type" },
+          EL("button", {
+            type: "button",
+            className: "tp-ws-val-filterbtn " + (kindFilter === "all" ? "active" : ""),
+            onClick: () => setKindFilter("all")
+          }, "All (" + audit.totalIssues + ")"),
+          audit.errorsCount > 0 && EL("button", {
+            type: "button",
+            className: "tp-ws-val-filterbtn " + (kindFilter === "error" ? "active" : ""),
+            onClick: () => setKindFilter("error")
+          }, "🛑 Errors (" + audit.errorsCount + ")"),
+          audit.warningsCount > 0 && EL("button", {
+            type: "button",
+            className: "tp-ws-val-filterbtn " + (kindFilter === "warn" ? "active" : ""),
+            onClick: () => setKindFilter("warn")
+          }, "⚠️ Rule Warnings (" + audit.warningsCount + ")"),
+          audit.missingCount > 0 && EL("button", {
+            type: "button",
+            className: "tp-ws-val-filterbtn " + (kindFilter === "missing" ? "active" : ""),
+            onClick: () => setKindFilter("missing")
+          }, "📋 Missing Data (" + audit.missingCount + ")"),
+          audit.infosCount > 0 && EL("button", {
+            type: "button",
+            className: "tp-ws-val-filterbtn " + (kindFilter === "info" ? "active" : ""),
+            onClick: () => setKindFilter("info")
+          }, "ℹ️ Notices (" + audit.infosCount + ")")
+        ),
+        EL("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
+          EL("input", {
+            className: "tp-txt sm",
+            style: { width: "170px", padding: "3px 8px", fontSize: "11.5px" },
+            placeholder: "Search issues / rules...",
+            value: search,
+            onChange: e => setSearch(e.target.value)
+          }),
+          search && EL("button", {
+            className: "tp-mini",
+            type: "button",
+            onClick: () => setSearch("")
+          }, "✕")
+        )
+      ),
+      filteredItems.length === 0 ? EL("div", {
+        style: { padding: "14px", textAlign: "center", fontSize: "12px", color: "var(--muted)" }
+      },
+        "No validation issues match the selected filters.",
+        EL("button", {
+          className: "tp-mini",
+          style: { marginLeft: "8px" },
+          onClick: () => { setKindFilter("all"); setScenarioFilter("all"); setSearch(""); }
+        }, "Reset filters")
+      ) : EL("div", { className: "tp-ws-val-list" },
+        filteredItems.map(item => EL("div", {
+          key: item.id,
+          className: "tp-ws-val-card kind-" + item.kind
+        },
+          EL("div", { className: "tp-ws-val-cardhead" },
+            EL("div", { className: "tp-ws-val-cardmeta" },
+              EL("span", {
+                className: "tp-ws-val-badge " + (item.kind === "error" ? "error" : (item.kind === "warn" ? "warn" : (item.kind === "missing" ? "missing" : "info")))
+              }, item.kind === "error" ? "🛑 BLOCKING ERROR" : (item.kind === "warn" ? "⚠️ RULE WARNING" : (item.kind === "missing" ? "📋 MISSING DATA POINT" : "ℹ️ REVIEW NOTICE"))),
+              EL("span", { className: "tp-ws-val-scen" }, item.scenarioName),
+              EL("span", { className: "tp-ws-val-cat" }, item.category),
+              item.citation && EL("span", { className: "tp-ws-val-cite" }, item.citation)
+            )
+          ),
+          EL("div", { className: "tp-ws-val-cardtitle" }, item.title),
+          EL("div", { className: "tp-ws-val-cardmsg" }, item.msg),
+          EL("div", { className: "tp-ws-val-cardactions" },
+            item.actionType === "drill-scorp" && EL("button", {
+              className: "tp-mini primary",
+              type: "button",
+              onClick: () => setDrill && setDrill({ id: item.scenarioId, type: "scorp" })
+            }, "Open S-Corp Drilldown ↗"),
+            item.actionType === "drill-wages" && EL("button", {
+              className: "tp-mini primary",
+              type: "button",
+              onClick: () => setDrill && setDrill({ id: item.scenarioId, type: "wages" })
+            }, "Open Wages Drilldown ↗"),
+            item.actionType === "drill-intdiv" && EL("button", {
+              className: "tp-mini primary",
+              type: "button",
+              onClick: () => setDrill && setDrill({ id: item.scenarioId, type: "intdiv" })
+            }, "Open Int/Div Drilldown ↗"),
+            item.actionType === "drill-passthrough" && EL("button", {
+              className: "tp-mini primary",
+              type: "button",
+              onClick: () => setDrill && setDrill({ id: item.scenarioId, type: "passthrough" })
+            }, "Open Passthrough Drilldown ↗"),
+            item.actionType === "group-income" && EL("button", {
+              className: "tp-mini primary",
+              type: "button",
+              onClick: () => setOpen && setOpen(o => ({ ...o, income: true }))
+            }, "Expand Income Group ↗"),
+            item.actionType === "group-ded" && EL("button", {
+              className: "tp-mini primary",
+              type: "button",
+              onClick: () => setOpen && setOpen(o => ({ ...o, ded: true }))
+            }, "Expand Deductions Group ↗"),
+            item.actionType === "group-other" && EL("button", {
+              className: "tp-mini primary",
+              type: "button",
+              onClick: () => setOpen && setOpen(o => ({ ...o, other: true }))
+            }, "Expand Other / Credits Group ↗"),
+            item.actionType === "missing-facts" && EL("button", {
+              className: "tp-mini primary",
+              type: "button",
+              onClick: () => goto && goto("clients")
+            }, "Open Client Missing Facts ↗"),
+            onAskAI && EL("button", {
+              className: "tp-mini ai",
+              type: "button",
+              onClick: () => onAskAI({
+                scenarioId: item.scenarioId === "client" ? activeId : item.scenarioId,
+                question: "Regarding validation rule/missing data point: '" + item.title + "' (" + (item.citation || "") + ") for " + item.scenarioName + ": " + item.msg + ". Explain the tax rule implications, the statutory authority, and specific steps to resolve this in the model.",
+                autoRun: true
+              })
+            }, I.chat, " Ask AI to Explain & Resolve")
+          )
+        ))
+      )
+    )
+  );
+}
+
+/* ============================================================================
    SCENARIOS — the input ledger
    ========================================================================== */
 function ScenariosPage({
@@ -535,9 +762,11 @@ function ScenariosPage({
   onAIOptimize,
   onAIReport,
   onAskAI,
+  onOpenSheetsExport,
   activeId,
   onAddPlanningScenario,
-  onModelStrategy
+  onModelStrategy,
+  goto
 }) {
   /* Ledger group collapse state persists per user; density is a preference. */
   const [open, setOpen] = useUIPref("ledger:groups", {
@@ -604,7 +833,7 @@ function ScenariosPage({
       try { r25 = computeScenario(s, status, 2025); } catch(e) { r25 = computeScenario(blankScenario(s.name), status, 2025); }
       try { r26 = computeScenario(s, status, 2026); } catch(e) { r26 = computeScenario(blankScenario(s.name), status, 2026); }
       ls.push(s25, s26);
-      lr.push({ s: s25, r: r25 }, { s: s26, r: r26 });
+      lr.push({ s: s25, r: r25, v: validateScenario(s, r25, status, 2025) }, { s: s26, r: r26, v: validateScenario(s, r26, status, 2026) });
     });
     return { ledgerScenarios: ls, ledgerResults: lr, allTags };
   }, [compareIds, scenarios, results, multiYearView, status, activeTagFilter]);
@@ -628,7 +857,18 @@ function ScenariosPage({
 
   return /*#__PURE__*/React.createElement("div", {
     className: "tp-stack"
-  }, onAIOptimize && /*#__PURE__*/React.createElement("div", {
+  }, EL(LedgerValidationStatusBar, {
+    ledgerScenarios,
+    ledgerResults,
+    client,
+    status,
+    year,
+    setDrill,
+    setOpen,
+    onAskAI,
+    activeId,
+    goto
+  }), onAIOptimize && /*#__PURE__*/React.createElement("div", {
     className: "tp-ai-bar"
   }, /*#__PURE__*/React.createElement("span", {
     className: "tp-ai-bar-label"
@@ -648,7 +888,13 @@ function ScenariosPage({
     className: "tp-btn ghost sm",
     type: "button",
     onClick: onAIReport
-  }, "AI Build Report"), onAddPlanningScenario && EL(PlanningScenariosMenu, {
+  }, "AI Build Report"), onOpenSheetsExport && EL("button", {
+    className: "tp-btn solid sm",
+    style: { background: "#047857", borderColor: "#047857", color: "#fff" },
+    type: "button",
+    title: "Sync the current scenario's ledger directly to a new Google Sheet",
+    onClick: () => onOpenSheetsExport("current", activeId)
+  }, I.sheets, " Sync to Google Sheets"), onAddPlanningScenario && EL(PlanningScenariosMenu, {
     onAddScenario: () => {
       const id = onAddPlanningScenario(activeId);
       setCompareIds(ids => ids ? Array.from(new Set([...ids, id])) : ids);
@@ -819,7 +1065,12 @@ function ScenariosPage({
         setTimeout(() => setCopyMsg(""), 1600);
       });
     }
-  }, "⧉ Copy for Excel"), copyMsg && EL("em", {
+  }, "⧉ Copy for Excel"), onOpenSheetsExport && EL("button", {
+    className: "tp-mini primary",
+    type: "button",
+    title: "Sync the current scenario's ledger directly to a new Google Sheet",
+    onClick: () => onOpenSheetsExport("current", activeId)
+  }, I.sheets, " Sync to Google Sheets"), copyMsg && EL("em", {
     className: "tp-copyxl-msg"
   }, copyMsg), compareIds && EL("span", {
     className: "tp-comparenote"
@@ -866,7 +1117,10 @@ function ScenariosPage({
     style: { fontSize: "0.85em", opacity: 0.8, textAlign: "center", marginBottom: "4px" }
   }, "TY" + s.calcYear), /*#__PURE__*/React.createElement("div", {
     className: "tp-schead-a"
-  }, compareIds && s.id !== baseId && /*#__PURE__*/React.createElement("button", {
+  }, onOpenSheetsExport && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onOpenSheetsExport("current", s.id),
+    title: "Sync \"" + s.name + "\" ledger directly to a new Google Sheet"
+  }, I.sheets), compareIds && s.id !== baseId && /*#__PURE__*/React.createElement("button", {
     onClick: () => removeFromCompare(s.id),
     title: "Remove from comparison (keeps the scenario)"
   }, I.x), /*#__PURE__*/React.createElement("button", {
@@ -1267,7 +1521,8 @@ function ScenariosPage({
     year: year,
     onClose: () => setDrill(null),
     update: (k, v) => update(drill.id, k, v),
-    onJump: t => setDrill({ id: drill.id, type: t })
+    onJump: t => setDrill({ id: drill.id, type: t }),
+    onOpenSheetsExport: () => onOpenSheetsExport && onOpenSheetsExport("current", drill.id)
   }), comparePicker && EL(ComparePickerModal, {
     scenarios: scenarios,
     results: results,
@@ -1606,7 +1861,8 @@ function DrillModal({
   year,
   onClose,
   update,
-  onJump
+  onJump,
+  onOpenSheetsExport
 }) {
   useEffect(() => {
     const k = e => e.key === "Escape" && onClose();
@@ -1622,10 +1878,16 @@ function DrillModal({
     className: "tp-modal-head"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "tp-eyebrow"
-  }, scenario.name), /*#__PURE__*/React.createElement("h3", null, DRILL_TITLES[type])), /*#__PURE__*/React.createElement("button", {
-    className: "tp-modal-x",
-    onClick: onClose
-  }, I.x)), /*#__PURE__*/React.createElement("div", {
+  }, scenario.name), /*#__PURE__*/React.createElement("h3", null, DRILL_TITLES[type])), EL("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginLeft: "auto" } },
+    onOpenSheetsExport && EL("button", {
+      className: "tp-btn solid sm",
+      style: { background: "#047857", borderColor: "#047857", color: "#fff", display: "inline-flex", alignItems: "center", gap: "6px" },
+      type: "button",
+      title: "Sync this scenario's ledger directly to a new Google Sheet",
+      onClick: onOpenSheetsExport
+    }, I.sheets, " Sync to Google Sheets"),
+    EL("button", { className: "tp-modal-x", onClick: onClose }, I.x)
+  )), /*#__PURE__*/React.createElement("div", {
     className: "tp-modal-body"
   }, type === "overview" && /*#__PURE__*/React.createElement(ScenarioOverviewEditor, {
     scenario: scenario,

@@ -244,7 +244,8 @@ function ToolsPanel({
   year,
   onOpenCalc,
   onGotoScenarios,
-  onAddNote
+  onAddNote,
+  onOpenSheetsExport
 }) {
   const r = result;
   /* Pinned calculators float to the top of the launcher; the pin set is a
@@ -289,7 +290,13 @@ function ToolsPanel({
     label: "Primary goal",
     value: topGoal.label,
     title: topGoal.reason || ""
-  }))), client && alignment && alignment.rows.length > 0 && EL(ToolSection, {
+  }), onOpenSheetsExport && EL("button", {
+    className: "tp-btn solid sm",
+    style: { width: "100%", marginTop: "10px", background: "#047857", borderColor: "#047857", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" },
+    type: "button",
+    title: "Sync this scenario's ledger directly to a new Google Sheet",
+    onClick: () => onOpenSheetsExport("current", active.id)
+  }, I.sheets, " Sync to Google Sheets"))), client && alignment && alignment.rows.length > 0 && EL(ToolSection, {
     id: "goals",
     title: "Goal monitor"
   }, alignment.pct != null && EL(StatLine, {

@@ -23,6 +23,11 @@ app.all("/api/ai/analyze", analyzeHandler);
 app.all("/api/ai/build-report", buildReportHandler);
 app.all("/api/ai/optimize", optimizeHandler);
 
+// Presentation demo direct routes
+app.get(["/demo", "/presentation", "/presentation-demo"], (req, res) => {
+  res.sendFile(path.join(__dirname, "presentation-demo.html"));
+});
+
 // Static assets
 app.use(express.static(path.join(__dirname, ".")));
 
