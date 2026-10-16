@@ -119,7 +119,8 @@ planning and compliance side by side over the same client data: tax scenarios an
 safe-harbor estimates, a rental §469/§199A analysis, a 50-strategy wealth plan, a
 Form 1040 tie-out with formula review findings, a filing calendar fed by planning
 decisions, and an AI tax advisor. Built from three demo client workbooks; see
-[planner/README.md](planner/README.md).
+[planner/README.md](planner/README.md). It also opens inside the Workbench from the
+**Tax Master Planner** item in the Planning navigation (`src/30-planner-page.js`).
 
 ```sh
 node --test planner/tests/engine.test.js

@@ -112,6 +112,22 @@ const browser = await chromium.launch({
   await settle("123456");
   ok((await firstMoney.inputValue()).replace(/,/g, "") === "123456", "redo re-applies the edit");
 
+  // money inputs store numbers, not the typed text, and typing stays natural
+  ok(await page.evaluate(() => TP_ACTIVE_CLIENT.scenarios.some(s => s.w2Wages === 123456)), "edited money input is stored as a number");
+  await firstMoney.click();
+  await firstMoney.press("Control+A");
+  await page.keyboard.type("12.5");
+  await page.waitForTimeout(150);
+  ok(await firstMoney.inputValue() === "12.5", "decimal point survives while typing (" + (await firstMoney.inputValue()) + ")");
+  ok(await page.evaluate(() => TP_ACTIVE_CLIENT.scenarios.some(s => s.w2Wages === 12.5)), "typed decimal is stored as the number 12.5");
+  await firstMoney.press("Control+A");
+  await page.keyboard.type("-300");
+  await page.waitForTimeout(150);
+  ok((await firstMoney.inputValue()) === "-300" && await page.evaluate(() => TP_ACTIVE_CLIENT.scenarios.some(s => s.w2Wages === -300)), "a leading minus survives while typing and stores -300");
+  await firstMoney.press("Control+A");
+  await page.keyboard.type(before.replace(/,/g, ""));
+  await firstMoney.blur();
+
   // pop-out buttons present
   ok(await page.locator(".tp-popout-tab").isVisible(), "open-in-new-tab control present");
   ok(await page.locator(".tp-popout-win").isVisible(), "pop-out control present");

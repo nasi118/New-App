@@ -358,8 +358,16 @@ function Money({
 
   const [localValue, setLocalValue] = React.useState(formatVal(value));
 
+  /* Re-sync from the stored value only when it differs from what is typed,
+     so intermediate text such as "-", "." or "12." survives while typing. */
   React.useEffect(() => {
-    setLocalValue(formatVal(value));
+    setLocalValue(prev => {
+      const typed = (prev || "").replace(/[^0-9.\-]/g, "");
+      const typedNum = typed === "" ? 0 : Number(typed);
+      const stored = Number(value) || 0;
+      if (Number.isFinite(typedNum) ? typedNum === stored : stored === 0) return prev;
+      return formatVal(value);
+    });
   }, [value]);
 
   const handleChange = e => {
@@ -386,7 +394,9 @@ function Money({
     if (digitsSeen === digitsBeforeCaret) newCaret = formatted.length;
     
     setLocalValue(formatted);
-    onChange(raw === "" ? 0 : raw);
+    // Store a number, never the typed string ("-" or "." alone count as 0).
+    const num = Number(raw);
+    onChange(raw === "" || !Number.isFinite(num) ? 0 : num);
     
     window.requestAnimationFrame(() => {
       if (el && document.activeElement === el) {

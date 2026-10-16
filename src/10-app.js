@@ -538,6 +538,11 @@ const TABS = [{
   icon: I.presentation,
   blurb: "Interactive slide presentation, real-time strategy simulation, and guided platform tour."
 }, {
+  id: "planner",
+  label: "Tax Master Planner",
+  icon: I.calc,
+  blurb: "Planning and compliance workspaces: tax scenarios and estimates, rental election, wealth strategies, Form 1040 tie-out and filing calendar."
+}, {
   id: "drive",
   label: "Google Drive",
   icon: I.drive,
@@ -554,7 +559,7 @@ const TABS = [{
 const NAV_GROUPS = [{
   key: "planning",
   label: "Planning",
-  ids: ["dashboard", "clients", "scenarios", "presentation", "ai", "guide", "report"]
+  ids: ["dashboard", "clients", "scenarios", "presentation", "planner", "ai", "guide", "report"]
 }, {
   key: "calc",
   label: "Calculations",
@@ -1542,6 +1547,7 @@ function App() {
         tab === "health" && EL(HealthModule, { scenario: active, result: activeResult, status, year, update: updateActive }),
         tab === "guide" && EL(PlanningGuide, { year, client: clientSafe, baseResult: baseline.r, onAskAI: askWorkspace, onAddNote: addQuickNote }),
         tab === "reference" && EL(ReferenceTables, { year, status }),
+        tab === "planner" && EL(PlannerPage, null),
         tab === "audit" && EL(AuditPage, { auditLog: clientAudit, setAuditLog: setClientAudit, scenarios, results, year, status, baseline, bestId, activeId: activeIdSafe }),
         tab === "data" && EL(DataPage, {
           scenarios, setScenarios: setScenariosLogged, results, status, year,
