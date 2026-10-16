@@ -915,7 +915,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 /* The app root repaints background, text color and font so themed CSS
    variables set on it (per tab) re-resolve for everything inherited. */
 .tp-root{min-height:100vh;background:var(--paper);color:var(--ink);
-  font-family:inherit}
+  font-family:var(--app-font,'Instrument Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif)}
 .ap-dark select,.ap-dark option{color:var(--ink);background:var(--card)}
 .ap-dark .tp-navtoggle{background:var(--card);color:var(--ink)}
 
@@ -954,7 +954,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
    text font. tabular-nums keeps financial columns aligned. */
 .tp-kpi strong, .tp-tbl th.num, .tp-tbl td.num, .tp-money, .tp-vtotal,
 .tp-cell, .tp-calc-val, .tp-calc-disp, .tp-qcalc-disp, .tp-statline strong {
-  font-family: inherit;
+  font-family: var(--app-font-num, var(--app-font, 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif));
   font-variant-numeric: tabular-nums lining-nums;
 }
 .ap-numw-medium .tp-tbl td.num, .ap-numw-medium .tp-cell, .ap-numw-medium .tp-money { font-weight: 600 }

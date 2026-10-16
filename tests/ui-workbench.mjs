@@ -96,10 +96,20 @@ const browser = await chromium.launch({
   const before = await firstMoney.inputValue();
   await firstMoney.fill("123456");
   await firstMoney.blur();
+  // Undo/redo re-render the ledger asynchronously; wait for the input to settle
+  // (bounded) instead of reading it on the same tick as the click.
+  const settle = async (want) => {
+    for (let i = 0; i < 40; i++) {
+      if ((await firstMoney.inputValue()).replace(/,/g, "") === want) return;
+      await page.waitForTimeout(50);
+    }
+  };
   await page.click(".tp-undoredo button >> nth=0");
+  await settle(before.replace(/,/g, ""));
   const afterUndo = await firstMoney.inputValue();
   ok(afterUndo.replace(/,/g, "") === before.replace(/,/g, ""), "undo restores edited input (" + before + " ← " + afterUndo + ")");
   await page.click(".tp-undoredo button >> nth=1");
+  await settle("123456");
   ok((await firstMoney.inputValue()).replace(/,/g, "") === "123456", "redo re-applies the edit");
 
   // pop-out buttons present
