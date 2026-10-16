@@ -45,6 +45,19 @@ jobs:
       - run: node tests/golden.test.mjs
       - run: node tests/client-identity.test.mjs
 
+  planner-tests:
+    name: Tax Master Planner engine tests + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test planner/tests/engine.test.js
+      - run: node planner/build.mjs
+      - name: Verify build output
+        run: test -s dist/tax-master-planner.html
+
   standalone-build:
     name: Standalone application build
     runs-on: ubuntu-latest
@@ -83,6 +96,8 @@ jobs:
             node tests/ui-strategy-library.mjs
           CHROMIUM_PATH="$(node -e 'console.log(require("playwright").chromium.executablePath())')" \
             node tests/ui-audit-estimated-tax.mjs
+          CHROMIUM_PATH="$(node -e 'console.log(require("playwright").chromium.executablePath())')" \
+            node planner/tests/ui-smoke.mjs
 
   excel-audit-smoke:
     name: Excel audit package generation + reconciliation

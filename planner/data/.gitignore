@@ -1,0 +1,3 @@
+# Source workbooks are not kept in git (see scripts/check_no_generated_artifacts.py).
+*
+!.gitignore
