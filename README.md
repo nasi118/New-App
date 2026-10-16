@@ -112,6 +112,22 @@ The `src/` files were authored as one script and share the global scope —
 
 ---
 
+## Tax Master Planner — planning and compliance workspaces (`planner/`)
+
+A separate static app at [`/planner/`](https://nasi118.github.io/AI-Tax/planner/) that runs
+planning and compliance side by side over the same client data: tax scenarios and
+safe-harbor estimates, a rental §469/§199A analysis, a 50-strategy wealth plan, a
+Form 1040 tie-out with formula review findings, a filing calendar fed by planning
+decisions, and an AI tax advisor. Built from three demo client workbooks; see
+[planner/README.md](planner/README.md).
+
+```sh
+node --test planner/tests/engine.test.js
+node planner/build.mjs               # dist/tax-master-planner.html
+```
+
+---
+
 ## `ai_tax` — deterministic engine + Tax Planning Analyst Agent (Python)
 
 The core design rule: **the engine — never the language model — is the

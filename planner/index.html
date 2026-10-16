@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--
+  (c) 2026 AI Tax Strategy Advisors. All Rights Reserved.
+  Proprietary and Confidential. See NOTICE.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tax Master Planner</title>
+<meta name="description" content="Planning and compliance workspaces for two demo households: tax scenarios and safe-harbor estimates, rental §469/§199A analysis, a 50-strategy wealth plan, a Form 1040 tie-out with review findings, and a filing calendar.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Sections">
+    <div class="brand">Tax Master Planner<small>Planning and compliance · two households</small></div>
+    <div class="seg ws" id="wsSeg" role="group" aria-label="Workspace"></div>
+    <div id="nav"></div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <button class="btn small menu-btn" data-action="menu" aria-label="Open sections">Menu</button>
+      <div class="crumbs" id="crumbs"></div>
+      <span class="spacer"></span>
+      <div class="seg" id="modeSeg" role="group" aria-label="Calculation logic"></div>
+      <button class="btn primary" data-action="advisor">Tax advisor</button>
+    </div>
+    <main class="content" id="content"></main>
+  </div>
+  <aside class="advisor" id="advisor" hidden aria-label="Tax advisor"></aside>
+</div>
+<div class="tooltip" id="tip" hidden></div>
+<div class="toast" id="toast" hidden role="status"></div>
+<!-- Load order matters: seed data, then the engine, then the UI, then the advisor. -->
+<script src="src/seed.js"></script>
+<script src="src/engine.js"></script>
+<script src="src/app.js"></script>
+<script src="src/advisor.js"></script>
+</body>
+</html>

@@ -45,6 +45,27 @@ jobs:
       - run: node tests/golden.test.mjs
       - run: node tests/client-identity.test.mjs
 
+  planner-tests:
+    name: Tax Master Planner tests + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test planner/tests/engine.test.js
+      - run: node planner/build.mjs
+      - name: Verify build output
+        run: test -s dist/tax-master-planner.html
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - name: Planner UI smoke test
+        run: |
+          python3 -m http.server 8321 &
+          sleep 1
+          CHROMIUM_PATH="$(node -e 'console.log(require("playwright").chromium.executablePath())')" \
+            node planner/tests/ui-smoke.mjs
+
   standalone-build:
     name: Standalone application build
     runs-on: ubuntu-latest
