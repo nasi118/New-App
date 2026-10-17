@@ -1,43 +1,27 @@
-# Unsupported Tax Situations
+# Known limits
 
-The engine models a deliberately bounded federal 1040 scope. Everything below
-is OUT of scope in `engine-0.1.0`. Where an unsupported situation is
-detectable from inputs, the engine emits a blocking, review-forcing
-diagnostic — it never silently approximates.
+Self-employment income, self-employment tax, and the section 199A QBI deduction are **calculated**. They are not unsupported.
 
-## Detected and blocked (diagnostic code)
+The Tax Master planner computes:
 
-- Self-employment income — SE tax, QBI deduction (`UNSUP-SE-001`, error)
-- Net capital loss beyond the annual limit — carryforward not tracked
-  (`ENG-CLCF-001`, warning + review)
-- Cash charitable gifts above 60% of AGI — AGI limitation and carryover not
-  modeled (`ENG-CHAR-001`, warning + review)
-- IRA / 401(k) contributions above the limit — capped with an error
-  diagnostic (`ENG-IRA-001`, `ENG-401K-001`)
+- Schedule SE (Social Security wage-base offset and the Medicare portion)
+- the deductible half of self-employment tax (section 164(f))
+- Additional Medicare tax where the planner engine includes it
+- the section 199A deduction, including the taxable-income limit and a wage / UBIA limit
 
-## Not modeled (callers and the agent must not imply otherwise)
+Do not describe those as out of scope, and do not treat a diagnostic that says they are unsupported as the product boundary. If an older Python build (`engine-0.1.0`) still emits `UNSUP-SE-001`, that diagnostic is stale. It is not a reason to omit the calculation.
 
-- State and local income tax returns (SALT is modeled only as an itemized
-  deduction input)
-- Alternative minimum tax (AMT)
-- Additional Medicare tax (0.9%); NIIT **is** modeled
-- Refundable additional child tax credit (CTC is nonrefundable here,
-  `ENG-ACTC-001` info)
-- OBBBA senior bonus deduction, tips/overtime deductions
-- IRA deduction active-participant phaseouts; backdoor-Roth basis (Form 8606)
-- Mortgage-interest acquisition-debt limits
-- Education credits, energy credits, foreign tax credit, dependent care
-- Estimated-tax penalties and safe harbors
-- Trusts, estates, entities, K-1s; multi-state allocation; amended returns
-- Tax-table lookup for taxable income under $100,000 (formula used;
-  `ENG-TABLE-001` info)
+## Still not a filed return
 
-## Planned specialist-agent boundaries (Phase 5)
+These items are outside the current engines. Where an input would make a silent guess dangerous, say so on the line. Do not approximate them.
 
-Specialists (Roth conversion, capital gains, charitable giving, retirement
-distribution, entity/compensation, state tax, document import, anomaly
-review) must reuse this engine, these rulesets, this reconciliation layer,
-and this review process. A specialist proposes structured scenario overrides
-through the existing tools; a specialist that needs new tax math means the
-ENGINE grows (with rulesets, golden tests, and reconciliation), never the
-prompt.
+- State and local income tax returns (SALT is an itemized-deduction input only)
+- Refundable additional child tax credit, where the engine computes only the nonrefundable credit
+- A full multi-year capital-loss or charitable carryover ledger (the annual limit is applied; the carry is disclosed, not stored as a closed ledger)
+- Mortgage acquisition-debt limits
+- Education credits, energy credits, the foreign tax credit limitation (Form 1116), and dependent care, except where a specific engine already computes them
+- Estimated-tax penalties
+- Form 1041 fiduciary income tax, GST tax, and multi-state allocation
+- The IRS tax table for taxable income under $100,000 (the formula is used)
+
+A specialist workflow has to use the same engine. If a strategy needs new tax math, the engine grows. The prompt does not.
