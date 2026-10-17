@@ -271,14 +271,20 @@
     if (accessToken) headers.authorization = 'Bearer ' + accessToken;
     return headers;
   }
-  function setAccessToken(value) {
-    accessToken = String(value || '').trim();
-    accessRevision++; connection = null;
-    paintStatus();
+  function setAccessToken(value, refresh = true) {
+    const token = String(value || '').trim();
+    if (token !== accessToken) { accessToken = token; accessRevision++; connection = null; }
+    if (refresh) paintStatus();
   }
   function bindAccessToken() {
     const input = document.getElementById('in-advisor-access');
-    if (input) { input.value = accessToken; input.onchange = () => setAccessToken(input.value); }
+    if (input) {
+      input.value = accessToken;
+      // Capture typing before navigation or another render replaces the field.
+      // Probe only on change; a keystroke must not issue a configuration request.
+      input.oninput = () => setAccessToken(input.value, false);
+      input.onchange = () => setAccessToken(input.value);
+    }
   }
   const SUGGEST = {
     t: ['Which planning column should we recommend, and why?', 'Why does AMT apply in the base column, and how could we reduce it?', 'What would harvesting another $100,000 of losses save?'],

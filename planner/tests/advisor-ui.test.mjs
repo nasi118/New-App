@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 let chromium;
-try { ({ chromium } = require('playwright')); }
+try { ({ chromium } = require(process.env.PLAYWRIGHT_HOME || 'playwright')); }
 catch { ({ chromium } = require(process.env.PLAYWRIGHT_HOME || '/opt/codex/cua_node/lib/node_modules/playwright')); }
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const server = createServer(async (req, res) => {
@@ -175,12 +175,15 @@ try {
   console.log('✓ Hosted advisor requires an app access token; token stays in memory and same-origin authorization headers');
 
   const racePage = await browser.newPage();
+  const raceTrace = [], raceErrors = [];
+  racePage.on('pageerror', error => raceErrors.push(error.message));
   let releaseOldCheck, sawOldCheck;
   const heldCheck = new Promise(resolve => { releaseOldCheck = resolve; });
   const oldCheckStarted = new Promise(resolve => { sawOldCheck = resolve; });
   let racePosts = 0;
   await racePage.route('**/api/ai/chat', async route => {
     const authorized = route.request().headers().authorization === 'Bearer ' + appToken;
+    raceTrace.push({ method: route.request().method(), authorized });
     if (route.request().method() === 'GET') {
       if (!authorized) { sawOldCheck(); await heldCheck; }
       return route.fulfill({ json: { provider: 'openai', configured: authorized, accessRequired: !authorized, message: authorized ? '' : 'Enter the app access token.' } });
@@ -193,11 +196,25 @@ try {
   await oldCheckStarted;
   await racePage.waitForFunction(() => !!window.TMP?.advisor);
   await racePage.evaluate(() => { window.pendingTokenQuestion = Advisor.ask('Use my private advisor.'); TMP.go('settings'); });
-  await racePage.fill('#in-advisor-access', appToken);
+  await racePage.locator('#in-advisor-access').waitFor();
+  // Navigation can render again on hashchange while the new token is being
+  // entered. Force that ordering instead of depending on browser scheduling.
+  await racePage.evaluate(token => {
+    const input = document.getElementById('in-advisor-access');
+    input.value = token;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    TMP.render();
+  }, appToken);
   await racePage.dispatchEvent('#in-advisor-access', 'change');
   releaseOldCheck();
   await racePage.evaluate(() => window.pendingTokenQuestion);
-  assert.equal(racePosts, 1, 'question awaiting an old configuration check retries with the newly entered token');
+  const raceState = await racePage.evaluate(token => ({
+    log: document.querySelector('#advLog').innerText,
+    status: document.querySelector('#advStatus').innerText,
+    button: document.querySelector('#advSend').textContent,
+    inputMatches: document.querySelector('#in-advisor-access')?.value === token
+  }), appToken);
+  assert.equal(racePosts, 1, 'question awaiting an old configuration check retries with the newly entered token: ' + JSON.stringify({ trace: raceTrace, errors: raceErrors, ...raceState }));
   assert.match(await racePage.locator('#advLog').innerText(), /New token wins the race/);
   console.log('✓ Delayed unauthenticated config cannot override a newly entered access token or its waiting question');
 } finally {
