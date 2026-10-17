@@ -1,0 +1,14 @@
+.tm-data-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:12px 0; }
+.tm-import-preview { margin-top:20px; }
+.tm-import-preview h2, #content > .grid2 > .panel h2:first-child { margin-top:0; }
+.tm-import-preview .field { max-width:560px; }
+.tm-dashboard-flow { color:var(--ink-2); font-size:14px; line-height:1.65; margin:12px 0 18px; }
+.tm-sheets-settings { display:grid; gap:12px; max-width:760px; }
+.tm-sheets-settings h3,.tm-sheets-settings p { margin:0; }
+.tm-sheets-settings label { display:grid; gap:5px; font-size:14px; color:var(--ink-2); }
+.tm-sheets-settings input,.app[data-view="connections"] #content > .card input { width:100%; padding:9px 11px; min-width:0; border:1px solid var(--input-line); border-radius:6px; color:var(--ink); background:var(--input-bg); }
+.app[data-view="connections"] #content > .card { padding:20px; margin:16px 0; background:var(--surface); border:1px solid var(--line); border-radius:10px; }
+.app[data-view="connections"] #content > .card h2:first-child { margin-top:0; }
+.app[data-view="connections"] #content > .card > label { display:grid; gap:6px; max-width:760px; }
+.app[data-view="connections"] table { width:100%; border-collapse:collapse; font-size:14px; }
+.app[data-view="connections"] th,.app[data-view="connections"] td { padding:10px; text-align:left; border-bottom:1px solid var(--line); }

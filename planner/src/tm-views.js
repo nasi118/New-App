@@ -18,7 +18,7 @@
     const clientLabel = (c) => c.info.name || [c.info.tpFirst, c.info.tpLast].filter(Boolean).join(' ') || 'Client';
     const yearOpts = [['2025', 'TY2025'], ['2026', 'TY2026']];
     const num = (path, v, o) => inputNum(path, v, o);
-    const optNum = (path, v, o) => '<input class="cell' + (o && o.cls ? ' ' + o.cls : '') + '" id="in-' + esc(path) + '" inputmode="decimal" data-bind="' + esc(path) + '" data-type="numopt" value="' + esc(v == null ? '' : v) + '"' + (o && o.ph != null ? ' placeholder="' + esc(o.ph) + '"' : '') + ' aria-label="' + esc((o && o.label) || path) + '"' + (o && o.title ? ' title="' + esc(o.title) + '"' : '') + '>';
+    const optNum = (path, v, o) => '<input class="cell' + (o && o.cls ? ' ' + o.cls : '') + '" id="in-' + esc(path) + '" inputmode="decimal" data-bind="' + esc(path) + '" data-type="numopt" value="' + esc(v == null ? '' : v) + '"' + (o && o.ph != null ? ' placeholder="' + esc(o.ph) + '"' : '') + (o && o.source != null ? ' data-total-source="' + esc(o.source) + '"' : '') + ' aria-label="' + esc((o && o.label) || path) + '"' + (o && o.title ? ' title="' + esc(o.title) + '"' : '') + '>';
     const dateIn = (path, v, label) => '<input class="cell txt" type="date" id="in-' + esc(path) + '" data-bind="' + esc(path) + '" data-type="text" value="' + esc(v || '') + '" aria-label="' + esc(label || path) + '">';
     const check = (path, v, label) => '<input type="checkbox" id="in-' + esc(path) + '" data-bind="' + esc(path) + '" data-type="bool"' + (v ? ' checked' : '') + ' aria-label="' + esc(label || path) + '">';
     const sevChip = (s) => (s === 'err' ? chip('bad', 'Error') : s === 'warn' ? chip('warn', 'Check') : chip('info', 'Note'));
@@ -49,10 +49,14 @@
     }
     // "Feeds the 1040" strip at the top of a module
     function feedStrip(items) {
-      const w = walk(); const x = w.baseX; const ov = C().direct || {};
+      const w = walk(); const x = w.baseX; const ov = C().direct || {}; const adjustments = C().adjustments || {};
       return '<div class="feeds">' + items.map(([leaf, line]) => {
-        const typed = ov[leaf] != null;
-        return '<a class="feed' + (typed ? ' typed' : '') + '" href="#walk" title="' + esc(typed ? 'Typed directly on the 1040 walk; the module amount is ' + money(w.feeds.x[leaf]) : 'Fed from this module') + '"><span class="ln">' + esc(line) + '</span><span class="lb">' + esc(TM.LEAF[leaf].label) + '</span><b>' + fmtNum(x[leaf]) + '</b>' + (typed ? '<span class="chip warn">typed</span>' : '') + '</a>';
+        const manual = ov[leaf] != null, adjusted = adjustments[leaf] != null;
+        const election = w.cols[0].planning[{ sepIra: 'retirement', hsa: 'hsa', iraDed: 'ira' }[leaf]];
+        const badge = manual ? 'manual total' : adjusted ? 'adjusted' : election && election.configured ? 'planned' : '';
+        const hint = manual ? 'Saved manual total on the 1040 walk.' : adjusted ? 'Includes a source adjustment of ' + money(adjustments[leaf]) + '.' : election && election.configured ? 'Includes the selected planning election.' : 'Calculated from the supporting module.';
+        const value = leaf === 'qbiDed' ? w.cols[0].r.f.l13a : x[leaf];
+        return '<a class="feed' + (badge ? ' typed' : '') + '" href="#walk" title="' + esc(hint) + '"><span class="ln">' + esc(line) + '</span><span class="lb">' + esc(TM.LEAF[leaf].label) + '</span><b>' + fmtNum(value) + '</b>' + (badge ? '<span class="chip info">' + badge + '</span>' : '') + '</a>';
       }).join('') + '</div>';
     }
     function modHead(title, lede, right) {
@@ -61,31 +65,8 @@
     }
 
     /* ================= SUMMARY DASHBOARD ================= */
-    function sankey(r) {
-      const f = r.f, s1 = r.s1;
-      const src = [
-        ['Wages & earned income', f.l1z], ['Interest & dividends', f.l2b + f.l3b], ['Capital gains', Math.max(0, f.l7) + Math.max(0, s1.l4)],
-        ['Business (Sch C)', Math.max(0, s1.l3)], ['Rental & K-1 (Sch E)', Math.max(0, s1.l5)], ['Retirement & other', f.l4b + f.l5b + f.l6b + Math.max(0, s1.l1 + s1.l2a + s1.l6 + s1.l7 + s1.l8z)],
-      ].filter((x) => x[1] > 0.5);
-      const total = src.reduce((s, x) => s + x[1], 0);
-      if (total <= 0) return '<p class="muted">No income entered yet.</p>';
-      const incTax = f.l22, other = f.l23, after = Math.max(0, total - incTax - other);
-      const dst = [['Federal income tax' + (r.amt.amt > 0 ? ' incl. AMT' : ''), incTax, 'tax'], ['SE, Medicare and NIIT', other, 'tax2'], ['Deductions shield', Math.min(after, f.l14), 'ded'], ['After-tax, above deductions', Math.max(0, after - f.l14), 'keep']].filter((x) => x[1] > 0.5);
-      const W = 760, H = 330, gap = 18, nodeW = 12, padL = 190, padR = 210, top = 26;
-      const scale = (H - top - gap * (Math.max(src.length, dst.length) - 1)) / total;
-      let y = top; const L = src.map(([t, v]) => { const h = Math.max(2, v * scale); const o = { t, v, y, h }; y += h + gap; return o; });
-      const midH = total * scale; const midY = top + (H - top - midH) / 2; const midX = W / 2 - nodeW / 2;
-      y = top; const Rn = dst.map(([t, v, k]) => { const h = Math.max(2, v * scale); const o = { t, v, k, y, h }; y += h + gap; return o; });
-      const rib = (x1, y1, h1, x2, y2, h2, cls, tip) => { const cx = (x1 + x2) / 2; return '<path class="rib ' + cls + '" data-tip="' + esc(tip) + '" d="M' + x1 + ',' + y1 + ' C' + cx + ',' + y1 + ' ' + cx + ',' + y2 + ' ' + x2 + ',' + y2 + ' L' + x2 + ',' + (y2 + h2) + ' C' + cx + ',' + (y2 + h2) + ' ' + cx + ',' + (y1 + h1) + ' ' + x1 + ',' + (y1 + h1) + ' Z"/>'; };
-      let svg = '<svg class="sankey" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Money flow from income sources to taxes and after-tax income">';
-      let my = midY;
-      L.forEach((o, i) => { svg += rib(padL + nodeW, o.y, o.h, midX, my, o.h, 's' + i, o.t + '|' + money(o.v) + ' · ' + pct(o.v / total, 0) + ' of income'); my += o.h; });
-      my = midY;
-      Rn.forEach((o) => { svg += rib(midX + nodeW, my, o.h, W - padR, o.y, o.h, o.k, o.t + '|' + money(o.v) + ' · ' + pct(o.v / total, 1) + ' of income'); my += o.h; });
-      L.forEach((o, i) => { svg += '<rect class="node s' + i + '" x="' + padL + '" y="' + o.y + '" width="' + nodeW + '" height="' + o.h + '"/><text x="' + (padL - 8) + '" y="' + (o.y + o.h / 2 - (o.h < 26 ? 0 : 6)) + '" text-anchor="end" dominant-baseline="middle">' + (o.h < 26 ? '<tspan>' + esc(o.t) + ' </tspan><tspan class="v">' + esc(moneyM(o.v)) + '</tspan>' : '<tspan>' + esc(o.t) + '</tspan><tspan class="v" x="' + (padL - 8) + '" dy="14">' + esc(moneyM(o.v)) + '</tspan>') + '</text>'; });
-      svg += '<rect class="node mid" x="' + midX + '" y="' + midY + '" width="' + nodeW + '" height="' + midH + '"/><text class="mid" x="' + (W / 2) + '" y="' + (Math.max(14, midY - 10)) + '" text-anchor="middle">Total income ' + esc(moneyM(total)) + '</text>';
-      Rn.forEach((o) => { svg += '<rect class="node ' + o.k + '" x="' + (W - padR) + '" y="' + o.y + '" width="' + nodeW + '" height="' + o.h + '"/><text x="' + (W - padR + nodeW + 8) + '" y="' + (o.y + o.h / 2 - (o.h < 26 ? 0 : 6)) + '" dominant-baseline="middle">' + (o.h < 26 ? '<tspan>' + esc(o.t) + ' </tspan><tspan class="v">' + esc(moneyM(o.v)) + '</tspan>' : '<tspan>' + esc(o.t) + '</tspan><tspan class="v" x="' + (W - padR + nodeW + 8) + '" dy="14">' + esc(moneyM(o.v)) + '</tspan>') + '</text>'; });
-      return svg + '</svg>';
+    function incomeChart(r) {
+      return window.TMDashboardCharts(r, { esc, money, pct });
     }
     const QDATES = (y) => [[y + '-04-15', 'Q1'], [y + '-06-15', 'Q2'], [y + '-09-15', 'Q3'], [(y + 1) + '-01-15', 'Q4']];
     // Estimated payments. A TY2025 base plans TY2026 from a projection; a TY2026 base (the
@@ -95,14 +76,13 @@
         const sh = TM.safeHarbor(c.info.priorTax, c.info.priorAgi, base.f.l24, base.f.l25d, base.x.estimates, c.info.status);
         return { ny: base.year, proj: base, sh, current: true, paid: n(base.x.estimates) };
       }
-      const ny = base.year + 1;
-      const ctx = Object.assign({}, TM.clientCtx(c, ny, c.info.status), { qbiItems: walk().feeds.items });
-      const proj = TM.computeReturn(TM.project(walk().baseX, (c.scen || {}).growth || 0.03), ctx);
+      const projection = TM.nextYearProjection(c, walk());
+      const ny = projection.year; const proj = projection.column.r;
       const sh = TM.safeHarbor(base.f.l24, base.agi, proj.f.l24, proj.f.l25d, 0, c.info.status);
-      return { ny, proj, sh, current: false, paid: 0 };
+      return { ny, proj, sh, current: false, paid: 0, growth: projection.growth };
     }
     const planNote = (c, plan) => 'Safe harbor: ' + (plan.sh.basis === 'prior' ? Math.round(plan.sh.pct * 100) + '% of ' + (plan.current ? 'prior-year' : 'this year\'s') + ' tax' : '90% of ' + (plan.current ? '' : 'projected ') + 'TY' + plan.ny + ' tax') +
-      (plan.current ? ' (prior-year tax from Client info)' : '. Projection grows income ' + pct((c.scen || {}).growth || 0.03, 1)) + '.';
+      (plan.current ? ' (prior-year tax from Client info)' : '. Projection grows income ' + pct(plan.growth, 1)) + '.';
     const planKv = (plan) => kv('Required annual payment', money(plan.sh.required)) + kv((plan.current ? '' : 'Projected ') + 'withholding', money(plan.proj.f.l25d)) + kv('Needed from estimates', money(plan.sh.fromEst)) +
       (plan.current ? kv('Estimates paid so far', money(plan.paid)) + kv('Still to pay', money(plan.sh.remaining)) : '');
     V.home = () => {
@@ -120,8 +100,10 @@
       h += '<div class="kpis">' + k('Total federal tax', money(base.f.l24), 'line 24 · ' + w.cols[0].col.name) + k('Effective rate', pct(base.effective, 1), 'of AGI · marginal ' + pct(base.marginal, 1)) + k('Adjusted gross income', moneyM(base.agi), 'taxable ' + moneyM(base.f.l15)) +
         k(base.net >= 0 ? 'Projected refund' : 'Projected balance due', money(Math.abs(base.net)), 'payments ' + money(base.f.l33), base.net < 0 ? 'neg' : 'pos') +
         k('Best planning column', saving > 0 ? money(saving) : '—', best ? best.col.name : 'add a column on the walk', saving > 0 ? 'pos' : '') + k('Review items', errs + ' / ' + warns, 'errors / checks in diagnostics and modules', errs ? 'neg' : '') + '</div>';
+      h += '<p class="tm-dashboard-flow">Live results from <a href="#client">Client information</a>, the <a href="#m-portfolio">income and deduction modules</a>, and the <a href="#walk">Form 1040 walk</a>. <a href="#planning-guide">Planning guide</a> · <a href="#report">Generate client report</a></p>';
+      h += window.TMTrends ? window.TMTrends(c, w, { esc, money, pct, metric: state.ui.dashboardMetric || 'tax' }) : '';
       h += '<div class="cmd-grid">';
-      h += '<section class="cpanel span2"><header><h2>Money flow</h2><span class="muted small">' + esc(w.cols[0].col.name) + '</span></header>' + sankey(base) + '</section>';
+      h += '<section class="cpanel span2"><header><h2>Income composition & federal tax</h2><span class="muted small">' + esc(w.cols[0].col.name) + '</span></header>' + incomeChart(base) + '</section>';
       // Scenario comparison
       const maxT = Math.max(...cols.map((x) => x.r.f.l24), 1);
       h += '<section class="cpanel"><header><h2>Planning columns</h2><a class="small" href="#walk">Edit</a></header><div class="cbars">' + cols.map((x, i) => '<div class="cbar"><div class="lbl">' + (i === 0 ? 'Base · ' : 'P' + i + ' · ') + esc(x.col.name) + '<span class="muted"> · TY' + x.col.year + '</span></div><div class="track"><div class="fill' + (i === 0 ? ' base' : '') + '" style="width:' + (100 * x.r.f.l24 / maxT).toFixed(1) + '%"></div></div><div class="val">' + moneyM(x.r.f.l24) + (i ? '<span class="' + (x.r.f.l24 <= base.f.l24 ? 'pos' : 'neg') + '"> ' + (x.r.f.l24 <= base.f.l24 ? '−' : '+') + moneyM(Math.abs(x.r.f.l24 - base.f.l24)).replace('−', '') + '</span>' : '') + '</div></div>').join('') + '</div>' +
@@ -187,8 +169,8 @@
       h += '<h2>Other income, adjustments, credits and payments</h2><p class="lede small">Amounts that are not built from a module. They flow to the 1040 walk, where any line can also be typed over.</p><div class="panel pad"><div class="form">' +
         fields.map(([k, ln]) => '<label class="field"><span><b class="ln-tag">' + esc(ln) + '</b> ' + esc(TM.LEAF[k].label) + '</span>' + num(O(k), o[k] == null ? '' : o[k], { label: TM.LEAF[k].label }) + '</label>').join('') + '</div></div>';
       h += '<h2>Prior year and planning facts</h2><div class="panel pad"><div class="form">' +
-        '<label class="field">Prior-year total tax' + num(P('priorTax'), i.priorTax) + '<span class="hint">Used for the current-year safe harbor (100% / 110% of prior-year tax)</span></label>' +
-        '<label class="field">Prior-year AGI' + num(P('priorAgi'), i.priorAgi) + '</label>' +
+        '<label class="field">Prior-year total tax' + optNum(P('priorTax'), i.priorTax, { label: 'Prior-year total tax' }) + '<span class="hint">Used for the current-year safe harbor (100% / 110% of prior-year tax). Leave blank if not entered.</span></label>' +
+        '<label class="field">Prior-year AGI' + optNum(P('priorAgi'), i.priorAgi, { label: 'Prior-year AGI' }) + '</label>' +
         '<label class="field">Preparer' + inputText(P('preparer'), i.preparer) + '</label><label class="field">Reviewer' + inputText(P('reviewer'), i.reviewer) + '</label></div>' +
         '<label class="field" style="margin-top:12px">Notes<textarea data-bind="' + esc(P('notes')) + '" data-type="text" id="in-' + esc(P('notes')) + '">' + esc(i.notes || '') + '</textarea></label></div>';
       h += '<p class="small muted" style="margin-top:14px">Demo data only. Use fictional or de-identified information; do not enter real taxpayer data in a public deployment.</p>';
@@ -330,10 +312,15 @@
       if (r.diag.some((d) => d.sev === 'warn' && d.line === ln)) return 'inc';
       if (res.col.growth) return 'est';
       if (j > 0 && Math.abs(rowVal(row, r) - rowVal(row, baseRes.r)) > 0.5) return 'est';
-      if (row.leaf && j === 0 && C().direct && C().direct[row.leaf] != null) return 'est';
+      if (row.leaf && j === 0 && ((C().direct || {})[row.leaf] != null || (C().adjustments || {})[row.leaf] != null)) return 'est';
+      if (row.leaf && j > 0 && ((res.col.ov || {})[row.leaf] != null || (res.col.adjustments || {})[row.leaf] != null)) return 'est';
       return 'ok';
     }
     const ST = { ok: ['ok', 'OK'], est: ['info', 'EST'], inc: ['warn', 'INC'], err: ['bad', 'ERR'] };
+    const walkUI = window.TMWalkUI(Object.assign({}, api, {
+      client: C, clientPath: cp, walk, rows: WALK, rowVal, rowStatus,
+      modViews: MOD_VIEW, renderModule: (key) => V[key](),
+    }));
 
     V.walk = () => {
       const c = C(); const w = walk(); const cols = w.cols; const det = w.feeds.detail;
@@ -348,13 +335,12 @@
         '<button class="btn small' + (showNotes ? ' on' : '') + '" data-action="walk-notes" aria-pressed="' + showNotes + '">Notes</button>' +
         '<button class="btn small primary" data-ask="' + esc('Walk me through ' + clientLabel(c) + '\'s Form 1040 for TY' + c.info.year + ' and compare the planning columns. What drives the difference, what should I watch for, and which column would you recommend?') + '">Ask AI</button>' +
         '<a class="btn small ghost" href="#settings" aria-label="Settings" title="Settings">⚙</a></div></div>';
-      if (ui.calcOpen) h += '<div class="calc panel pad"><label class="field">Calculator — arithmetic only, e.g. <code>(145000+52000)*0.062</code><input id="calcIn" class="cell txt" value="' + esc(ui.calcExpr || '') + '" aria-label="Expression" autocomplete="off"></label><div class="calc-out" id="calcOut">' + esc(ui.calcOut || '') + '</div></div>';
       // Working-on chips
       h += '<div class="working"><span class="muted small">Working on</span>' + cols.map((x, j) => '<button class="wchip' + (j === aj ? ' on' : '') + '" data-action="walk-col" data-val="' + j + '"><b>' + esc(x.col.name) + '</b><span>' + moneyM(x.r.f.l24) + ' · ' + pct(x.r.effective, 1) + '</span></button>').join('') +
         (cols.length < MAX_COLS ? '<span class="addcol"><button class="btn small" data-action="add-col" data-val="base">+ Planning column</button>' + (aj > 0 ? '<button class="btn small ghost" data-action="add-col" data-val="dup">Duplicate “' + esc(act.col.name) + '”</button>' : '') + '</span>' : '<span class="muted small">5 planning columns is the maximum</span>') + '</div>';
       h += '<div class="walk-opts"><button class="btn small ghost" data-action="walk-expand" data-val="1">Expand all</button><button class="btn small ghost" data-action="walk-expand" data-val="0">Collapse all</button>' +
         '<label class="small"><input type="checkbox" data-action-check="walkHideZero"' + (hideZero ? ' checked' : '') + '> Hide zero lines</label><label class="small"><input type="checkbox" data-action-check="walkAuth"' + (showAuth ? ' checked' : '') + '> Authority</label>' +
-        '<span class="legend-note" style="margin:0"><span><i class="sw"></i>Typed over the module</span><span><i class="sw diff"></i>Differs from base</span></span></div>';
+        '<span class="legend-note" style="margin:0"><span><i class="sw"></i>Source adjustment / manual total</span><span><i class="sw diff"></i>Differs from base</span></span></div>';
       h += '<div class="walk-layout"><div class="walk-main"><div class="tablewrap walkwrap"><table class="t walk"><thead><tr><th class="ln">Line</th><th>Description</th>' + 
         cols.map((x, j) => '<th class="n colh' + (j === aj ? ' act' : '') + '">' + colHead(x, j) + '</th>').join('') + '<th>Status</th>' + (showNotes ? '<th>Notes</th>' : '') + '</tr></thead><tbody>';
       // Planning moves (levers) per column
@@ -375,28 +361,33 @@
         const desc = typeof row.d === 'function' ? row.d(act.r) : row.d;
         let tr = '<tr class="' + (row.tot ? 'total ' : '') + (depth ? 'subrow ' : '') + (row.sub ? 'clickable ' : '') + '"' + (row.sub ? ' data-toggle="w:' + row.k + '" tabindex="0" aria-expanded="' + !!open + '"' : '') + '>' +
           '<td class="ln">' + esc(row.ln) + '</td><td class="wrap"><span style="padding-left:' + depth * 16 + 'px;display:inline-block">' + (row.sub ? '<span class="caret">' + (open ? '▾' : '▸') + '</span> ' : '') + esc(desc) + '</span>' +
-          (row.mod && MOD_VIEW[row.mod] && row.mod !== 'client' ? ' <a class="modlink" href="#' + MOD_VIEW[row.mod] + '" title="Open the module that feeds this line">module</a>' : '') + (showAuth && row.a ? '<div class="auth" style="padding-left:' + (depth * 16 + (row.sub ? 16 : 0)) + 'px">IRC ' + esc(row.a) + '</div>' : '') + '</td>' +
-''; 
+          (row.mod && MOD_VIEW[row.mod] && row.mod !== 'client' ? ' <a class="modlink" href="#' + MOD_VIEW[row.mod] + '" title="Open the module that feeds this line">module</a>' : '') + (showAuth && row.a ? '<div class="auth" style="padding-left:' + (depth * 16 + (row.sub ? 16 : 0)) + 'px">IRC ' + esc(row.a) + '</div>' : '') + walkUI.rowActions(row) + '</td>';
         cols.forEach((x, j) => {
           const v = vals[j]; const diff = j > 0 && Math.abs(v - vals[0]) > 0.5;
           if (row.leaf) {
-            const path = j === 0 ? cp('direct.' + row.leaf) : cp('cols.' + (j - 1) + '.ov.' + row.leaf);
-            const typed = j === 0 ? (c.direct || {})[row.leaf] != null : ((x.col.ov || {})[row.leaf] != null);
-            const feedV = j === 0 ? w.feeds.x[row.leaf] : null;
+            const legacy = !!row.opt || (j === 0 ? (c.direct || {})[row.leaf] != null : (x.col.ov || {})[row.leaf] != null);
+            const adjustments = j === 0 ? (c.adjustments || {}) : (x.col.adjustments || {});
+            const path = j === 0 ? cp((legacy ? 'direct.' : 'adjustments.') + row.leaf) : cp('cols.' + (j - 1) + (legacy ? '.ov.' : '.adjustments.') + row.leaf);
+            const typed = j === 0 ? (c.direct || {})[row.leaf] != null || adjustments[row.leaf] != null : (x.col.ov || {})[row.leaf] != null || adjustments[row.leaf] != null;
+            const source = x.sourceX ? n(x.sourceX[row.leaf]) : v - n(adjustments[row.leaf]);
             const shown = row.opt && !typed ? '' : (row.cnt ? v : fmtIn(v));
-            tr += '<td class="n' + (j === aj ? ' act' : '') + '">' + optNum(path, shown, { cls: (typed ? 'ovr' : '') + (diff ? ' diff' : ''), ph: row.opt ? fmtNum(v) : '', label: desc + ' — ' + x.col.name, title: typed ? (j === 0 ? 'Typed over the module amount ' + money(feedV) + '. Clear the cell to use the module.' : 'Typed for this column. Clear the cell to follow the base.') : '' }) +
-              (diff ? '<div class="delta ' + (v > vals[0] ? 'up' : 'down') + '">' + (v > vals[0] ? '+' : '−') + fmtNum(Math.abs(v - vals[0])) + '</div>' : '') + '</td>';
+            tr += '<td class="n' + (j === aj ? ' act' : '') + '">' + optNum(path, shown, { cls: (typed ? 'ovr' : '') + (diff ? ' diff' : ''), ph: row.opt ? fmtNum(v) : '', label: desc + ' — ' + x.col.name, source: legacy ? null : source, title: typed ? (j === 0 ? (legacy ? 'Saved manual total. ' : 'Source subtotal ' + money(source) + ' plus an adjustment. ') + 'Clear the cell to use the source calculation.' : 'Adjusted for this column. Clear the cell to follow its source calculation.') : '' }) +
+              (diff ? '<div class="delta ' + (v > vals[0] ? 'up' : 'down') + '">' + (v > vals[0] ? '+' : '−') + fmtNum(Math.abs(v - vals[0])) + '</div>' : '') + walkUI.controls(row, x, j) + '</td>';
           } else tr += '<td class="n' + (j === aj ? ' act' : '') + (v < -0.004 ? ' neg' : '') + (diff ? ' diffc' : '') + '">' + fmtNum(v) + (diff ? '<div class="delta ' + (v > vals[0] ? 'up' : 'down') + '">' + (v > vals[0] ? '+' : '−') + fmtNum(Math.abs(v - vals[0])) + '</div>' : '') + '</td>';
         });
         tr += '<td>' + chip(ST[st][0], ST[st][1]) + '</td>' + (showNotes ? '<td class="notecell"><input class="cell txt" data-bind="' + esc(cp('notes.' + row.k)) + '" data-type="text" id="note-' + row.k + '" value="' + esc((c.notes || {})[row.k] || '') + '" aria-label="Note for line ' + esc(row.ln) + '" placeholder="Add a note"></td>' : '') + '</tr>';
         if (open) row.sub.forEach((s) => { tr += renderRow(s, depth + 1); });
         return tr;
       };
-      WALK.forEach((row) => { h += renderRow(row, 0); });
+      let section = '';
+      WALK.forEach((row) => {
+        if (row.s) section = row.s;
+        if (!ui.walkSection || ui.walkSection === 'all' || ui.walkSection === section) h += renderRow(row, 0);
+      });
       h += '</tbody></table></div></div>';
       h += walkSide(act, base, aj, w);
       h += '</div>';
-      return h;
+      return h + walkUI.renderPanel();
     };
     function leverSummary(col) {
       const parts = TM.LEVERS.filter((l) => (col.lv || {})[l.key] != null && (col.lv || {})[l.key] !== '').map((l) => l.label.split(' (')[0] + ' ' + moneyM(col.lv[l.key]));
@@ -418,9 +409,9 @@
       const det = w.feeds.detail;
       const each = (rows) => rows.forEach((row) => { if (row.s) return; counts[rowStatus(row, act, base, det, aj)]++; if (row.sub) each(row.sub); });
       each(WALK);
-      const priorReq = n(c.info.priorTax) > 0 ? Math.min(0.9 * r.f.l24, n(c.info.priorTax) * (n(c.info.priorAgi) > 150000 ? 1.1 : 1)) : 0.9 * r.f.l24;
+      const priorReq = TM.safeHarbor(c.info.priorTax, c.info.priorAgi, r.f.l24, r.f.l25d, r.f.l26, r.status).required;
       const paid = r.f.l25d + r.f.l26;
-      let h = '<aside class="walk-side"><div class="panel pad"><h3>Live projection</h3><div class="muted small" style="margin:-4px 0 8px">' + esc(act.col.name) + ' · TY' + r.year + ' · ' + esc(TM.statusLabel(r.status)) + '</div><dl class="kv">' +
+      let h = '<aside class="walk-side">' + walkUI.sectionNav() + walkUI.toolbox(act) + '<div class="panel pad"><h3>Live projection</h3><div class="muted small" style="margin:-4px 0 8px">' + esc(act.col.name) + ' · TY' + r.year + ' · ' + esc(TM.statusLabel(r.status)) + '</div><dl class="kv">' +
         kv('Adjusted gross income', money(r.agi)) + kv('Taxable income', money(r.f.l15)) + kv('Total tax', money(r.f.l24)) + kv('Total payments', money(r.f.l33)) +
         kv('Effective rate (of AGI)', pct(r.effective, 1)) + kv('Marginal rate, next $1,000', pct(r.marginal, 1)) + '</dl>' +
         '<div class="proj ' + (r.net >= 0 ? 'pos' : 'neg') + '"><span>' + (r.net >= 0 ? 'Projected refund' : 'Projected balance due') + '</span><b>' + money(Math.abs(r.net)) + '</b></div>' +
@@ -510,7 +501,7 @@
     };
 
     V['m-rents'] = () => {
-      const c = C(); const w = walk(); const det = w.feeds.detail; const R = det.rents; const pas = det.pas; const m = c.mod.rents; const sel = state.ui.sel && state.ui.sel.rent;
+      const c = C(); const w = walk(); const det = w.feeds.detail; const R = det.rents; const pas = w.cols[0].passive || det.pas; const m = c.mod.rents; const sel = state.ui.sel && state.ui.sel.rent;
       let h = modHead('Rents & royalty', 'Schedule E part I. Each property\'s net result goes through the passive activity rules with any passive K-1s (Form 8582) before it reaches Schedule 1 line 5.');
       h += feedStrip([['schE', 'S1-5'], ['niiOther', '8960']]);
       h += '<div class="panel pad" style="margin-bottom:14px"><label class="field" style="flex-direction:row;gap:8px;align-items:center">' + check(cp('mod.rents.rep'), m.rep, 'Real estate professional') + ' Taxpayer qualifies as a real estate professional (§469(c)(7)) — rentals with material participation are nonpassive</label><p class="small muted" style="margin:6px 0 0">See <a href="#r-469">Rental election & ownership</a> for the hours tests and the §469(c)(7)(A) aggregation election.</p></div>';
@@ -582,18 +573,25 @@
     /* ================= TAX SCENARIOS & ESTIMATES ================= */
     V.scen = () => {
       const c = C(); const w = walk(); const base0 = w.cols[0]; const sc = c.scen || (c.scen = { growth: 0.03, scenarios: [{ name: 'Baseline', levers: {} }] });
-      const proj = !!sc.project; const year = proj ? Math.min(2026, base0.col.year + 1) : base0.col.year;
-      const ctx = Object.assign({}, TM.clientCtx(c, year, c.info.status), { qbiItems: w.feeds.items });
-      const bx = proj ? TM.project(w.baseX, sc.growth) : w.baseX;
-      const res = sc.scenarios.map((s) => { const x = TM.applyLevers(bx, s.levers); const r = TM.computeReturn(x, ctx); r.marginal = TM.marginal(x, ctx, r); r.cash = sum(TM.LEVERS.filter((l) => l.key !== 'extraEst' && l.key !== 'deferIncome'), (l) => (l.op === 'set' ? Math.max(0, n(s.levers[l.key]) - n(bx[l.leaf])) : l.key === 'roth' || l.key === 'harvest' ? 0 : n(s.levers[l.key]))); return { s, r }; });
+      const { proj, year, ctx, bx, res, columns } = TM.scenarioClient(c, w);
       const b = res[0].r;
       let h = head('Modules · ' + clientLabel(c), 'Tax scenarios & estimates', 'Compare planning moves side by side on ' + (proj ? 'a TY' + year + ' projection' : 'the TY' + year + ' return') + '. Every scenario starts from the base column of the 1040 walk and is figured with the same engine. Send a scenario to the walk to see it line by line.', '<a class="btn" href="#walk">Open 1040 walk</a>');
       h += '<div class="form" style="margin-bottom:14px;grid-template-columns:repeat(auto-fit,minmax(200px,260px))"><label class="field">Starting point' + selectBind(cp('scen.project'), String(proj), [['false', 'TY' + base0.col.year + ' return (what-if)'], ['true', 'TY' + Math.min(2026, base0.col.year + 1) + ' projection']], { bool: true }) + '</label>' +
         (proj ? '<label class="field">Income growth' + inputNum(cp('scen.growth'), sc.growth, { pct: true, dp: 1 }) + '</label>' : '') + '</div>';
+      const inherited = [['retirement', 'retirement'], ['hsa', 'HSA'], ['ira', 'IRA']].filter(([key]) => columns.some((column) => column.planning[key].configured));
+      if (inherited.length) h += '<div class="banner"><span><strong>Using walk elections.</strong> These scenarios inherit ' + esc(inherited.map(([, name]) => name).join(', ')) + ' elections from the <a href="#walk">Form 1040 walk</a>. ' +
+        (inherited.some(([key]) => key !== 'ira') ? 'Active retirement and HSA elections set the corresponding rows below. Change or clear an election on the walk to enter a different contribution amount. ' : '') +
+        (inherited.some(([key]) => key === 'ira') ? 'IRA eligibility and deductibility recalculate for each scenario.' : '') + '</span></div>';
       h += '<div class="tablewrap"><table class="t"><thead><tr><th style="min-width:230px">Planning move</th>' + res.map((x, i) => '<th class="n" style="min-width:150px">' + (i === 0 ? 'Baseline' : '<span style="display:inline-flex;gap:4px;align-items:center">Scenario ' + (i + 1) + '<button class="btn small ghost" data-action="del-scen" data-val="' + i + '" aria-label="Remove ' + esc(x.s.name) + '" title="Remove scenario">×</button></span>') + '</th>').join('') + '</tr></thead><tbody>';
       h += '<tr><td>Scenario name</td>' + sc.scenarios.map((x, i) => '<td>' + inputText(cp('scen.scenarios.' + i + '.name'), x.name, { label: 'Scenario name' }) + '</td>').join('') + '</tr>';
       TM.LEVERS.forEach((lv) => {
-        h += '<tr><td>' + esc(lv.label) + '<div class="muted small">' + esc(lv.hint) + '</div></td>' + sc.scenarios.map((x, i) => '<td class="n">' + (i === 0 ? '<span class="muted small">' + (lv.op === 'set' ? money(bx[lv.leaf]) : '—') + '</span>' : inputNum(cp('scen.scenarios.' + i + '.levers.' + lv.key), x.levers[lv.key] == null ? '' : x.levers[lv.key], { label: lv.label + ' for ' + x.name })) + '</td>').join('') + '</tr>';
+        const electionKey = lv.key === 'sepIra' ? 'retirement' : lv.key === 'hsa' ? 'hsa' : null;
+        const governed = electionKey && columns.some((column) => column.planning[electionKey].configured);
+        const title = governed ? (electionKey === 'retirement' ? 'Retirement' : 'HSA') + ' deduction (walk election)' : lv.label;
+        const hint = governed ? 'Calculated from the walk election for each scenario’s income and tax year.' : lv.hint;
+        h += '<tr><td>' + esc(title) + '<div class="muted small">' + esc(hint) + '</div></td>' + sc.scenarios.map((x, i) => '<td class="n">' +
+          (electionKey && columns[i].planning[electionKey].configured ? '<span data-scenario-election="' + electionKey + '">' + fmtNum(columns[i].x[lv.leaf]) + '</span><div class="muted small">Walk election · <a href="#walk">Change</a></div>' :
+            i === 0 ? '<span class="muted small">' + (lv.op === 'set' ? money(bx[lv.leaf]) : '—') + '</span>' : inputNum(cp('scen.scenarios.' + i + '.levers.' + lv.key), x.levers[lv.key] == null ? '' : x.levers[lv.key], { label: lv.label + ' for ' + x.name })) + '</td>').join('') + '</tr>';
       });
       const row = (t, fn, o) => { o = o || {}; return '<tr class="' + (o.total ? 'total' : '') + '"><td>' + t + '</td>' + res.map((x) => (o.fmt ? '<td class="n">' + o.fmt(x.r) + '</td>' : cellNum(fn(x.r)))).join('') + '</tr>'; };
       h += '<tr><td colspan="' + (res.length + 1) + '" class="secrow">Results</td></tr>';
@@ -615,7 +613,11 @@
     };
 
     /* ================= actions ================= */
-    function audit(path, from, to, note) { state.audit.push({ ts: new Date().toISOString(), by: 'you', path, from, to, note, noUndo: true }); }
+    function audit(path, from, to, note) {
+      const match = /^tm\.clients\.(\d+)(\.|$)/.exec(path), client = match && state.data.tm.clients[+match[1]];
+      state.audit.push({ ts: new Date().toISOString(), by: 'you', path, from, to, note, noUndo: true,
+        ...(client ? { clientId: client.id, clientName: client.info.name, recordYear: client.info.year } : {}) });
+    }
     const uid = () => 'c' + Math.random().toString(36).slice(2, 9);
     function blankClient() {
       return { id: uid(), info: { name: 'New client', tpFirst: '', tpLast: '', status: 'mfj', year: 2026, state: '', baseName: 'Base' }, deps: [], w2: [], other: {},
@@ -623,6 +625,7 @@
         direct: {}, cols: [], scen: { growth: 0.03, scenarios: [{ name: 'Baseline', levers: {} }] }, notes: {} };
     }
     function action(a, t) {
+      if (walkUI.action(a, t)) return true;
       const c = C(); const done = () => { api.save(); api.invalidate(); api.render(); return true; };
       if (a === 'add-row') { const arr = getPath(state.data, t.dataset.path); if (!arr) return true; arr.push(JSON.parse(t.dataset.tpl || '{}')); audit(t.dataset.path, null, arr.length, 'Added row'); return done(); }
       if (a === 'del-row') { const arr = getPath(state.data, t.dataset.path); const i = +t.dataset.val; if (!arr) return true; const gone = arr.splice(i, 1)[0]; audit(t.dataset.path + '.' + i, (gone && (gone.name || gone.desc || gone.payer || gone.lotId)) || 'row', null, 'Removed row'); state.ui.sel = {}; return done(); }
@@ -656,6 +659,14 @@
       return false;
     }
     function onChange(el) {
+      if (el.dataset.trendMetric) { state.ui.dashboardMetric = el.value; api.render(); return true; }
+      if (el.dataset.totalSource != null) {
+        const raw = el.value.trim();
+        const entered = raw === '' ? undefined : api.parseVal('num', raw);
+        if (entered === null) { api.toast('Enter a number, for example 12500 or (1,200).'); el.focus(); return true; }
+        api.applyChange(el.dataset.bind, entered === undefined ? undefined : entered - Number(el.dataset.totalSource), 'you', 'Form 1040 source adjustment');
+        api.render(); return true;
+      }
       if (el.dataset.clientPick) { tmData().active = el.value; state.ui.walkCol = 0; state.ui.sel = {}; api.save(); api.invalidate(); api.render(); return true; }
       if (el.dataset.actionCheck) { const k = el.dataset.actionCheck; state.ui[k] = k === 'walkAuth' ? el.checked : el.checked; api.render(); return true; }
       return false;
@@ -677,6 +688,6 @@
       { group: 'Wealth strategy', items: [['h-dash', 'Wealth strategy dashboard'], ['h-matrix', 'Strategy matrix'], ['h-cost', 'Cost-benefit & package'], ['h-check', 'Implementation checklist']] },
       { group: 'Review & compliance', items: [['c-home', 'Compliance dashboard'], ['w-tie', 'Form 1040 tie-out'], ['findings', 'Review findings'], ['calendar', 'Filing calendar'], ['w-sources', 'Source documents'], ['w-sched', 'Schedules'], ['w-review', 'Review & sign-off'], ['r-props', 'Rental properties'], ['r-199a', 'Rental return positions'], ['r-statements', 'Election statements']] },
     ];
-    return { VIEWS: V, NAV, action, onChange, onInput, clientLabel, active: C, walkRows: WALK, rowVal };
+    return { VIEWS: V, NAV, action, onChange, onInput, clientLabel, active: C, walkRows: WALK, rowVal, explainLine: walkUI.explainLine, afterRender: walkUI.afterRender, onKeydown: (e) => { if (e.key === 'Enter' && e.target.id === 'calcIn') { e.preventDefault(); walkUI.evaluate(); return true; } return false; } };
   };
 })();

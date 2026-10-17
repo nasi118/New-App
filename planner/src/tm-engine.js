@@ -23,14 +23,16 @@
   const STATUSES = [['single', 'Single'], ['mfj', 'Married filing jointly'], ['mfs', 'Married filing separately'], ['hoh', 'Head of household'], ['qss', 'Qualifying surviving spouse']];
   TM.STATUSES = STATUSES;
   TM.statusLabel = (s) => (STATUSES.find((x) => x[0] === s) || STATUSES[1])[1];
-  const T = (single, mfj, mfs, hoh) => ({ single, mfj, mfs, hoh, qss: mfj });
+  // QSS shares the joint rate tables, but joint-return-only deductions and
+  // phaseouts must specify their own surviving-spouse value.
+  const T = (single, mfj, mfs, hoh, qss = mfj) => ({ single, mfj, mfs, hoh, qss });
   const YEARS = {
     2025: {
       br: T([11925, 48475, 103350, 197300, 250525, 626350], [23850, 96950, 206700, 394600, 501050, 751600], [11925, 48475, 103350, 197300, 250525, 375800], [17000, 64850, 103350, 197300, 250500, 626350]),
       cg0: T(48350, 96700, 48350, 64750), cg15: T(533400, 600050, 300000, 566700),
       std: T(15750, 31500, 15750, 23625), addlStdMarried: 1600, addlStdSingle: 2000,
       saltCap: 40000, saltThr: 500000, wageBase: 176100, ctc: 2200, actc: 1700, odc: 500,
-      qbiThr: T(197300, 394600, 197300, 197300), qbiRange: T(50000, 100000, 50000, 50000), qbiMin: false,
+      qbiThr: T(197300, 394600, 197300, 197300, 197300), qbiRange: T(50000, 100000, 50000, 50000, 50000), qbiMin: false,
       amtEx: T(88100, 137000, 68500, 88100), amtPhase: T(626350, 1252700, 626350, 626350), amtPhaseRate: 0.25, amtBp: T(239100, 239100, 119550, 239100),
       hsaSelf: 4300, hsaFamily: 8550, charityNonItem: 0, charityFloor: 0, itemizedCap: false,
     },
@@ -39,9 +41,9 @@
       cg0: T(49450, 98900, 49450, 66200), cg15: T(545500, 613700, 306850, 579600),
       std: T(16100, 32200, 16100, 24150), addlStdMarried: 1650, addlStdSingle: 2050,
       saltCap: 40400, saltThr: 505000, wageBase: 184500, ctc: 2200, actc: 1700, odc: 500,
-      qbiThr: T(201750, 403500, 201750, 201750), qbiRange: T(75000, 150000, 75000, 75000), qbiMin: true,
+      qbiThr: T(201750, 403500, 201775, 201750, 201750), qbiRange: T(75000, 150000, 75000, 75000, 75000), qbiMin: true,
       amtEx: T(90100, 140200, 70100, 90100), amtPhase: T(500000, 1000000, 500000, 500000), amtPhaseRate: 0.5, amtBp: T(244500, 244500, 122250, 244500),
-      hsaSelf: 4400, hsaFamily: 8750, charityNonItem: T(1000, 2000, 1000, 1000), charityFloor: 0.005, itemizedCap: true,
+      hsaSelf: 4400, hsaFamily: 8750, charityNonItem: T(1000, 2000, 1000, 1000, 1000), charityFloor: 0.005, itemizedCap: true,
     },
   };
   const RATES = [0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37];
@@ -49,19 +51,21 @@
   TM.params = function (year, status) {
     const Y = YEARS[year] || YEARS[2025]; const s = status in Y.std ? status : 'mfj';
     const pick = {}; Object.keys(Y).forEach((k) => { pick[k] = Y[k] && typeof Y[k] === 'object' && !Array.isArray(Y[k]) && 'mfj' in Y[k] ? Y[k][s] : Y[k]; });
-    const married = s === 'mfj' || s === 'qss';
+    const married = s === 'mfj' || s === 'qss', joint = s === 'mfj';
     return Object.assign(pick, {
-      year: YEARS[year] ? +year : 2025, status: s, married,
+      year: YEARS[year] ? +year : 2025, status: s, married, joint,
       brackets: pick.br.map((top, i) => [top, RATES[i]]).concat([[Infinity, 0.37]]),
       saltCap: s === 'mfs' ? Y.saltCap / 2 : Y.saltCap, saltThr: s === 'mfs' ? Y.saltThr / 2 : Y.saltThr, saltFloor: s === 'mfs' ? 5000 : 10000,
       capLossLimit: s === 'mfs' ? 1500 : 3000,
-      ssBase: s === 'mfs' ? [0, 0] : married ? [32000, 44000] : [25000, 34000],
-      ctcPhase: married ? 400000 : 200000,
+      // Pub. 915 Worksheet 1 and Schedule 8812 reserve these larger thresholds
+      // for an actual joint return, unlike the rate/AMT/NIIT tables.
+      ssBase: s === 'mfs' ? [0, 0] : joint ? [32000, 44000] : [25000, 34000],
+      ctcPhase: joint ? 400000 : 200000,
       niitThr: married ? 250000 : s === 'mfs' ? 125000 : 200000,
-      addlMedThr: married ? 250000 : s === 'mfs' ? 125000 : 200000,
+      addlMedThr: joint ? 250000 : s === 'mfs' ? 125000 : 200000,
       palPhase: s === 'mfs' ? null : [100000, 150000],
-      seniorPhase: married ? 150000 : 75000, tipsPhase: married ? 300000 : 150000, carPhase: married ? 200000 : 100000,
-      overtimeCap: married ? 25000 : 12500,
+      seniorPhase: joint ? 150000 : 75000, tipsPhase: joint ? 300000 : 150000, carPhase: joint ? 200000 : 100000,
+      overtimeCap: joint ? 25000 : 12500,
     });
   };
   // Start of the 37% bracket, used by the 2026 itemized-deduction limit (§68 as amended)
@@ -241,7 +245,7 @@
     a.limit = 0;
     if (p.itemizedCap) a.limit = (2 / 37) * Math.min(a.l17pre, Math.max(0, agi - top37(p)));
     a.l17 = a.l17pre - a.limit;
-    const seniors = Math.max(0, Math.min(p.married ? 2 : 1, n(ctx.seniors))); const blind = Math.max(0, n(ctx.blind));
+    const seniors = Math.max(0, Math.min(p.joint ? 2 : 1, n(ctx.seniors))); const blind = Math.max(0, Math.min(p.joint ? 2 : 1, n(ctx.blind)));
     a.std = p.std + (seniors + blind) * (p.married || p.status === 'mfs' ? p.addlStdMarried : p.addlStdSingle);
     a.itemize = a.l17 > a.std || L('forceItemize') > 0;
     a.method = a.itemize ? 'Itemized' : 'Standard';
@@ -249,29 +253,41 @@
     f.l12 = (a.itemize ? a.l17 : a.std) + a.nonItemCharity;
 
     // ---------- Schedule 1-A (2025–2028) ----------
-    const phase = (amt, thr, per) => Math.max(0, amt - Math.ceil(Math.max(0, magi - thr) / 1000) * per);
-    s1a.tips = p.status === 'mfs' ? 0 : phase(Math.min(L('tips'), 25000), p.tipsPhase, 100);
-    s1a.overtime = p.status === 'mfs' ? 0 : phase(Math.min(L('overtime'), p.overtimeCap), p.tipsPhase, 100);
-    s1a.car = phase(Math.min(L('carLoanInt'), 10000), p.carPhase, 200);
-    s1a.senior = p.status === 'mfs' ? 0 : Math.max(0, seniors * 6000 - 0.06 * Math.max(0, magi - p.seniorPhase));
+    // 2025 Schedule 1-A lines 11/19 round the $1,000 steps DOWN for tips
+    // and overtime; line 28 rounds UP for qualified car-loan interest.
+    // irs.gov/pub/irs-pdf/f1040s1a.pdf, same statutory rules through TY2028.
+    const phase = (amt, thr, per, round) => Math.max(0, amt - round(Math.max(0, magi - thr) / 1000) * per);
+    s1a.tips = p.status === 'mfs' ? 0 : phase(Math.min(L('tips'), 25000), p.tipsPhase, 100, Math.floor);
+    s1a.overtime = p.status === 'mfs' ? 0 : phase(Math.min(L('overtime'), p.overtimeCap), p.tipsPhase, 100, Math.floor);
+    s1a.car = phase(Math.min(L('carLoanInt'), 10000), p.carPhase, 200, Math.ceil);
+    // Line 35 computes one $6,000 deduction after the 6% phaseout; each
+    // eligible spouse then takes that same amount on lines 36a/36b.
+    s1a.senior = p.status === 'mfs' ? 0 : seniors * Math.max(0, 6000 - 0.06 * Math.max(0, magi - p.seniorPhase));
     s1a.total = s1a.tips + s1a.overtime + s1a.car + s1a.senior;
     f.l13b = s1a.total;
 
     // ---------- QBI (line 13a) ----------
     const tiBefore = Math.max(0, agi - f.l12 - f.l13b);
     const items = (ctx.qbiItems || []).map((it) => ({ ...it }));
-    // Schedule C items are reduced by deductions attributable to the trade: half of SE tax, SE health insurance and retirement contributions
+    // Schedule C items are reduced by deductions attributable to the trade.
     const cItems = items.filter((it) => it.src === 'schC');
     const cBase = sum(cItems, (it) => it.gross);
     const cDelta = s1.l3 - cBase; // the walk or a planning column changed Schedule C
     if (cItems.length) cItems[0].gross = n(cItems[0].gross) + cDelta;
     else if (s1.l3) items.push({ name: 'Schedule C', src: 'schC', gross: s1.l3, w2: 0, ubia: 0, sstb: false }), cItems.push(items[items.length - 1]);
     const cTot = sum(cItems, (it) => Math.max(0, it.gross));
-    const attributable = se.ded * (se.base ? s1.l3 / se.base : 0) + L('seHealth') + L('sepIra');
-    cItems.forEach((it) => { const share = cTot > 0 ? Math.max(0, it.gross) / cTot : 1 / cItems.length; it.qbi = n(it.gross) - attributable * share; });
-    // K-1 QBI is reduced by the deductible half of SE tax on that partner's self-employment earnings
     const kSe = items.filter((it) => it.src === 'k1' && n(it.se) > 0); const kSeTot = sum(kSe, (it) => it.se);
-    kSe.forEach((it) => { it.qbi = n(it.qbi) - se.ded * (se.base ? L('seK1') / se.base : 0) * (n(it.se) / kSeTot); });
+    // Reg. 1.199A-3(b)(1)(vi): retirement deductions reduce the QBI of the
+    // businesses whose earnings fund them, proportionately. The planning
+    // contribution uses both Schedule C and K-1 SE earnings. Keep any K-1 SE
+    // earnings absent from QBI records outside the qualifying allocation.
+    // Primary source: irs.gov/irb/2019-09_IRB.
+    const retirementBase = cTot + Math.max(kSeTot, Math.max(0, L('seK1')));
+    const retirementPart = (earnings) => retirementBase > 0 ? L('sepIra') * Math.max(0, earnings) / retirementBase : 0;
+    const attributable = se.ded * (se.base ? s1.l3 / se.base : 0) + L('seHealth');
+    cItems.forEach((it) => { const share = cTot > 0 ? Math.max(0, it.gross) / cTot : 1 / cItems.length; it.qbi = n(it.gross) - attributable * share - retirementPart(n(it.gross)); });
+    // Preserve the existing half-SE-tax allocation to each partner's earnings.
+    kSe.forEach((it) => { it.qbi = n(it.qbi) - se.ded * (se.base ? L('seK1') / se.base : 0) * (n(it.se) / kSeTot) - retirementPart(n(it.se)); });
     const q = TM.qbi(items, tiBefore, f.l3a + d.ncg, L('reitPtp'), L('qbiCarry'), p);
     q.typed = x.qbiDed != null && x.qbiDed !== '';
     f.l13a = q.typed ? L('qbiDed') : r2(q.ded);

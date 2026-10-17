@@ -9,10 +9,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Tax Master</title>
 <meta name="description" content="Individual Form 1040 planning for TY2025 and TY2026: a summary dashboard, a Form 1040 walk with up to five planning columns, income and deduction modules, wealth strategy, and review and compliance workpapers.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
 <link rel="stylesheet" href="src/styles.css">
+<link rel="stylesheet" href="src/tm-shell.css">
+<link rel="stylesheet" href="src/tm-review.css">
+<link rel="stylesheet" href="src/tm-library.css">
+<link rel="stylesheet" href="src/tm-client-hub.css">
+<link rel="stylesheet" href="src/tm-data.css">
+<link rel="stylesheet" href="src/tm-trends.css">
 </head>
 <body>
 <div class="app">
@@ -27,10 +30,13 @@
       <div class="crumbs" id="crumbs"></div>
       <span class="spacer"></span>
       <div class="seg" id="modeSeg" role="group" aria-label="Calculation logic"></div>
+      <button class="btn small" data-action="recalculate" title="Refresh all source modules and return columns">Recalculate</button>
+      <button class="btn small" data-action="shell-tools-toggle" aria-controls="toolsRail">Tools</button>
       <button class="btn primary" data-action="advisor">Tax advisor</button>
     </div>
     <main class="content" id="content"></main>
   </div>
+  <aside id="toolsRail" class="tms-tools-rail" aria-label="Planner tools"></aside>
   <aside class="advisor" id="advisor" hidden aria-label="Tax advisor"></aside>
 </div>
 <div class="tooltip" id="tip" hidden></div>
@@ -42,7 +48,17 @@
 <script src="src/tm-modules.js"></script>
 <script src="src/tm-seed.js"></script>
 <script src="src/tm-sources.js"></script>
+<script src="src/tm-dashboard.js"></script>
+<script src="src/tm-walk-details.js"></script>
+<script src="src/tm-trends.js"></script>
 <script src="src/tm-views.js"></script>
+<script src="src/tm-excel.js"></script>
+<script src="src/tm-data.js"></script>
+<script src="src/tm-shell.js"></script>
+<script src="src/tm-client-hub.js"></script>
+<script src="src/tm-review.js"></script>
+<script src="src/tm-library.js"></script>
+<script src="src/tm-sheets.js"></script>
 <script src="src/app.js"></script>
 <script src="src/advisor.js"></script>
 </body>

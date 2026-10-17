@@ -24,7 +24,9 @@ console.log("wrote", out, Math.round(Buffer.byteLength(html) / 1024), "KB");
 if (process.argv.includes("--artifact")) {
   // The Artifact publisher supplies doctype/html/head/body; keep title, fonts, styles, body and scripts.
   const head = html.slice(html.indexOf("<head>") + 6, html.indexOf("</head>"));
-  const body = html.slice(html.indexOf("<body>") + 6, html.indexOf("</body>"));
+  // Report templates contain a literal </body> inside JavaScript strings.
+  // The document's closing tag is the final one, after every inlined module.
+  const body = html.slice(html.indexOf("<body>") + 6, html.lastIndexOf("</body>"));
   const keep = head.split("\n").filter((l) => /<title>|fonts\.g|<style>|<\/style>/.test(l) || !/^<(meta|link)/.test(l)).join("\n");
   const frag = join(root, "dist", "tax-master.artifact.html");
   writeFileSync(frag, keep + "\n" + body);
