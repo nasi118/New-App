@@ -53,7 +53,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test planner/tests/engine.test.js planner/tests/tm-engine.test.js planner/tests/tm-planning.test.js planner/tests/tm-qbi-attribution.test.js planner/tests/tm-dashboard.test.js planner/tests/advisor-server.test.cjs
+      - run: node --test planner/tests/*.test.js planner/tests/*.test.cjs
       - run: node planner/build.mjs
       - name: Verify build output
         run: test -s dist/tax-master.html
@@ -69,6 +69,10 @@ jobs:
         run: |
           CHROMIUM_PATH="$(node -e 'console.log(require("playwright").chromium.executablePath())')" \
             node planner/tests/advisor-ui.test.mjs
+      - name: Workspace, Excel and client report browser checks
+        run: |
+          CHROMIUM_PATH="$(node -e 'console.log(require("playwright").chromium.executablePath())')" \
+            node planner/tests/workspace-ui.test.mjs
 
   standalone-build:
     name: Standalone application build

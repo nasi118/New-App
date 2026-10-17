@@ -76,14 +76,13 @@
         const sh = TM.safeHarbor(c.info.priorTax, c.info.priorAgi, base.f.l24, base.f.l25d, base.x.estimates, c.info.status);
         return { ny: base.year, proj: base, sh, current: true, paid: n(base.x.estimates) };
       }
-      const ny = base.year + 1;
-      const ctx = Object.assign({}, TM.clientCtx(c, ny, c.info.status), { qbiItems: walk().feeds.items });
-      const proj = TM.computeReturn(TM.project(walk().baseX, (c.scen || {}).growth || 0.03), ctx);
+      const projection = TM.nextYearProjection(c, walk());
+      const ny = projection.year; const proj = projection.column.r;
       const sh = TM.safeHarbor(base.f.l24, base.agi, proj.f.l24, proj.f.l25d, 0, c.info.status);
-      return { ny, proj, sh, current: false, paid: 0 };
+      return { ny, proj, sh, current: false, paid: 0, growth: projection.growth };
     }
     const planNote = (c, plan) => 'Safe harbor: ' + (plan.sh.basis === 'prior' ? Math.round(plan.sh.pct * 100) + '% of ' + (plan.current ? 'prior-year' : 'this year\'s') + ' tax' : '90% of ' + (plan.current ? '' : 'projected ') + 'TY' + plan.ny + ' tax') +
-      (plan.current ? ' (prior-year tax from Client info)' : '. Projection grows income ' + pct((c.scen || {}).growth || 0.03, 1)) + '.';
+      (plan.current ? ' (prior-year tax from Client info)' : '. Projection grows income ' + pct(plan.growth, 1)) + '.';
     const planKv = (plan) => kv('Required annual payment', money(plan.sh.required)) + kv((plan.current ? '' : 'Projected ') + 'withholding', money(plan.proj.f.l25d)) + kv('Needed from estimates', money(plan.sh.fromEst)) +
       (plan.current ? kv('Estimates paid so far', money(plan.paid)) + kv('Still to pay', money(plan.sh.remaining)) : '');
     V.home = () => {
@@ -101,6 +100,8 @@
       h += '<div class="kpis">' + k('Total federal tax', money(base.f.l24), 'line 24 · ' + w.cols[0].col.name) + k('Effective rate', pct(base.effective, 1), 'of AGI · marginal ' + pct(base.marginal, 1)) + k('Adjusted gross income', moneyM(base.agi), 'taxable ' + moneyM(base.f.l15)) +
         k(base.net >= 0 ? 'Projected refund' : 'Projected balance due', money(Math.abs(base.net)), 'payments ' + money(base.f.l33), base.net < 0 ? 'neg' : 'pos') +
         k('Best planning column', saving > 0 ? money(saving) : '—', best ? best.col.name : 'add a column on the walk', saving > 0 ? 'pos' : '') + k('Review items', errs + ' / ' + warns, 'errors / checks in diagnostics and modules', errs ? 'neg' : '') + '</div>';
+      h += '<p class="tm-dashboard-flow">Live results from <a href="#client">Client information</a>, the <a href="#m-portfolio">income and deduction modules</a>, and the <a href="#walk">Form 1040 walk</a>. <a href="#planning-guide">Planning guide</a> · <a href="#report">Generate client report</a></p>';
+      h += window.TMTrends ? window.TMTrends(c, w, { esc, money, pct, metric: state.ui.dashboardMetric || 'tax' }) : '';
       h += '<div class="cmd-grid">';
       h += '<section class="cpanel span2"><header><h2>Income composition & federal tax</h2><span class="muted small">' + esc(w.cols[0].col.name) + '</span></header>' + incomeChart(base) + '</section>';
       // Scenario comparison
@@ -168,8 +169,8 @@
       h += '<h2>Other income, adjustments, credits and payments</h2><p class="lede small">Amounts that are not built from a module. They flow to the 1040 walk, where any line can also be typed over.</p><div class="panel pad"><div class="form">' +
         fields.map(([k, ln]) => '<label class="field"><span><b class="ln-tag">' + esc(ln) + '</b> ' + esc(TM.LEAF[k].label) + '</span>' + num(O(k), o[k] == null ? '' : o[k], { label: TM.LEAF[k].label }) + '</label>').join('') + '</div></div>';
       h += '<h2>Prior year and planning facts</h2><div class="panel pad"><div class="form">' +
-        '<label class="field">Prior-year total tax' + num(P('priorTax'), i.priorTax) + '<span class="hint">Used for the current-year safe harbor (100% / 110% of prior-year tax)</span></label>' +
-        '<label class="field">Prior-year AGI' + num(P('priorAgi'), i.priorAgi) + '</label>' +
+        '<label class="field">Prior-year total tax' + optNum(P('priorTax'), i.priorTax, { label: 'Prior-year total tax' }) + '<span class="hint">Used for the current-year safe harbor (100% / 110% of prior-year tax). Leave blank if not entered.</span></label>' +
+        '<label class="field">Prior-year AGI' + optNum(P('priorAgi'), i.priorAgi, { label: 'Prior-year AGI' }) + '</label>' +
         '<label class="field">Preparer' + inputText(P('preparer'), i.preparer) + '</label><label class="field">Reviewer' + inputText(P('reviewer'), i.reviewer) + '</label></div>' +
         '<label class="field" style="margin-top:12px">Notes<textarea data-bind="' + esc(P('notes')) + '" data-type="text" id="in-' + esc(P('notes')) + '">' + esc(i.notes || '') + '</textarea></label></div>';
       h += '<p class="small muted" style="margin-top:14px">Demo data only. Use fictional or de-identified information; do not enter real taxpayer data in a public deployment.</p>';
@@ -572,18 +573,25 @@
     /* ================= TAX SCENARIOS & ESTIMATES ================= */
     V.scen = () => {
       const c = C(); const w = walk(); const base0 = w.cols[0]; const sc = c.scen || (c.scen = { growth: 0.03, scenarios: [{ name: 'Baseline', levers: {} }] });
-      const proj = !!sc.project; const year = proj ? Math.min(2026, base0.col.year + 1) : base0.col.year;
-      const ctx = Object.assign({}, TM.clientCtx(c, year, c.info.status), { qbiItems: w.feeds.items });
-      const bx = proj ? TM.project(w.baseX, sc.growth) : w.baseX;
-      const res = sc.scenarios.map((s) => { const x = TM.applyLevers(bx, s.levers); const r = TM.computeReturn(x, ctx); r.marginal = TM.marginal(x, ctx, r); r.cash = sum(TM.LEVERS.filter((l) => l.key !== 'extraEst' && l.key !== 'deferIncome'), (l) => (l.op === 'set' ? Math.max(0, n(s.levers[l.key]) - n(bx[l.leaf])) : l.key === 'roth' || l.key === 'harvest' ? 0 : n(s.levers[l.key]))); return { s, r }; });
+      const { proj, year, ctx, bx, res, columns } = TM.scenarioClient(c, w);
       const b = res[0].r;
       let h = head('Modules · ' + clientLabel(c), 'Tax scenarios & estimates', 'Compare planning moves side by side on ' + (proj ? 'a TY' + year + ' projection' : 'the TY' + year + ' return') + '. Every scenario starts from the base column of the 1040 walk and is figured with the same engine. Send a scenario to the walk to see it line by line.', '<a class="btn" href="#walk">Open 1040 walk</a>');
       h += '<div class="form" style="margin-bottom:14px;grid-template-columns:repeat(auto-fit,minmax(200px,260px))"><label class="field">Starting point' + selectBind(cp('scen.project'), String(proj), [['false', 'TY' + base0.col.year + ' return (what-if)'], ['true', 'TY' + Math.min(2026, base0.col.year + 1) + ' projection']], { bool: true }) + '</label>' +
         (proj ? '<label class="field">Income growth' + inputNum(cp('scen.growth'), sc.growth, { pct: true, dp: 1 }) + '</label>' : '') + '</div>';
+      const inherited = [['retirement', 'retirement'], ['hsa', 'HSA'], ['ira', 'IRA']].filter(([key]) => columns.some((column) => column.planning[key].configured));
+      if (inherited.length) h += '<div class="banner"><span><strong>Using walk elections.</strong> These scenarios inherit ' + esc(inherited.map(([, name]) => name).join(', ')) + ' elections from the <a href="#walk">Form 1040 walk</a>. ' +
+        (inherited.some(([key]) => key !== 'ira') ? 'Active retirement and HSA elections set the corresponding rows below. Change or clear an election on the walk to enter a different contribution amount. ' : '') +
+        (inherited.some(([key]) => key === 'ira') ? 'IRA eligibility and deductibility recalculate for each scenario.' : '') + '</span></div>';
       h += '<div class="tablewrap"><table class="t"><thead><tr><th style="min-width:230px">Planning move</th>' + res.map((x, i) => '<th class="n" style="min-width:150px">' + (i === 0 ? 'Baseline' : '<span style="display:inline-flex;gap:4px;align-items:center">Scenario ' + (i + 1) + '<button class="btn small ghost" data-action="del-scen" data-val="' + i + '" aria-label="Remove ' + esc(x.s.name) + '" title="Remove scenario">×</button></span>') + '</th>').join('') + '</tr></thead><tbody>';
       h += '<tr><td>Scenario name</td>' + sc.scenarios.map((x, i) => '<td>' + inputText(cp('scen.scenarios.' + i + '.name'), x.name, { label: 'Scenario name' }) + '</td>').join('') + '</tr>';
       TM.LEVERS.forEach((lv) => {
-        h += '<tr><td>' + esc(lv.label) + '<div class="muted small">' + esc(lv.hint) + '</div></td>' + sc.scenarios.map((x, i) => '<td class="n">' + (i === 0 ? '<span class="muted small">' + (lv.op === 'set' ? money(bx[lv.leaf]) : '—') + '</span>' : inputNum(cp('scen.scenarios.' + i + '.levers.' + lv.key), x.levers[lv.key] == null ? '' : x.levers[lv.key], { label: lv.label + ' for ' + x.name })) + '</td>').join('') + '</tr>';
+        const electionKey = lv.key === 'sepIra' ? 'retirement' : lv.key === 'hsa' ? 'hsa' : null;
+        const governed = electionKey && columns.some((column) => column.planning[electionKey].configured);
+        const title = governed ? (electionKey === 'retirement' ? 'Retirement' : 'HSA') + ' deduction (walk election)' : lv.label;
+        const hint = governed ? 'Calculated from the walk election for each scenario’s income and tax year.' : lv.hint;
+        h += '<tr><td>' + esc(title) + '<div class="muted small">' + esc(hint) + '</div></td>' + sc.scenarios.map((x, i) => '<td class="n">' +
+          (electionKey && columns[i].planning[electionKey].configured ? '<span data-scenario-election="' + electionKey + '">' + fmtNum(columns[i].x[lv.leaf]) + '</span><div class="muted small">Walk election · <a href="#walk">Change</a></div>' :
+            i === 0 ? '<span class="muted small">' + (lv.op === 'set' ? money(bx[lv.leaf]) : '—') + '</span>' : inputNum(cp('scen.scenarios.' + i + '.levers.' + lv.key), x.levers[lv.key] == null ? '' : x.levers[lv.key], { label: lv.label + ' for ' + x.name })) + '</td>').join('') + '</tr>';
       });
       const row = (t, fn, o) => { o = o || {}; return '<tr class="' + (o.total ? 'total' : '') + '"><td>' + t + '</td>' + res.map((x) => (o.fmt ? '<td class="n">' + o.fmt(x.r) + '</td>' : cellNum(fn(x.r)))).join('') + '</tr>'; };
       h += '<tr><td colspan="' + (res.length + 1) + '" class="secrow">Results</td></tr>';
@@ -605,7 +613,11 @@
     };
 
     /* ================= actions ================= */
-    function audit(path, from, to, note) { state.audit.push({ ts: new Date().toISOString(), by: 'you', path, from, to, note, noUndo: true }); }
+    function audit(path, from, to, note) {
+      const match = /^tm\.clients\.(\d+)(\.|$)/.exec(path), client = match && state.data.tm.clients[+match[1]];
+      state.audit.push({ ts: new Date().toISOString(), by: 'you', path, from, to, note, noUndo: true,
+        ...(client ? { clientId: client.id, clientName: client.info.name, recordYear: client.info.year } : {}) });
+    }
     const uid = () => 'c' + Math.random().toString(36).slice(2, 9);
     function blankClient() {
       return { id: uid(), info: { name: 'New client', tpFirst: '', tpLast: '', status: 'mfj', year: 2026, state: '', baseName: 'Base' }, deps: [], w2: [], other: {},
@@ -647,6 +659,7 @@
       return false;
     }
     function onChange(el) {
+      if (el.dataset.trendMetric) { state.ui.dashboardMetric = el.value; api.render(); return true; }
       if (el.dataset.totalSource != null) {
         const raw = el.value.trim();
         const entered = raw === '' ? undefined : api.parseVal('num', raw);

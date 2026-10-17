@@ -12,8 +12,9 @@ Three components live in this repository:
 
 1. **Tax Master** (`planner/`, opened from the site root) — the main app: individual
    Form 1040 planning for TY2025/TY2026 with a summary dashboard, client info, a Form 1040
-   walk with up to five planning columns, income and deduction modules, wealth strategy,
-   and review and compliance workpapers. See [Tax Master](#tax-master--individual-1040-planning-planner).
+   walk with up to five planning columns, shared Planning/Compliance workspaces,
+   income and deduction modules, client reports, Excel interchange and optional
+   OpenAI/Google Sheets connections. See [Tax Master](#tax-master--individual-1040-planning-planner).
 2. **Tax Planning Workbench** (formerly Tax Advisory Pro) — the classic dependency-free static
    web app (React 18, no build step), now served at `workbench.html`.
 3. **`ai_tax` (Python)** — an audit-grade deterministic tax calculation
@@ -117,20 +118,57 @@ The `src/` files were authored as one script and share the global scope —
 
 ## Tax Master — individual 1040 planning (`planner/`)
 
-The main app, opened from the site root ([live](https://nasi118.github.io/AI-Tax/)). Each client has:
+The main app opens at `/planner/` from the site root. **Planning** and
+**Compliance** use the same active client's source records and return engine;
+their grouped navigation can be collapsed independently. Start in **Client list**
+with a blank client, an existing record or a separate prior-year roll-forward.
 
-- **Summary dashboard** (landing page) — KPIs, money flow from income to tax, planning columns, estimated payments, module status and diagnostics.
-- **Client info** — filing facts, dependents, W-2s and the income, credits and payments that are not built from a module.
-- **Form 1040 walk** — every 1040 line with its IRC authority and status (OK / EST / INC / ERR), expandable schedules, a live projection, diagnostics and an AMT estimate. Add up to **five planning columns** beside the base; each mirrors Form 1040 and has its own year, filing status, planning moves and typed lines.
-- **Modules** — Portfolio income, Schedule C, Capital transactions (investment assets, business assets, equity compensation), Rents & royalty, Passthrough K-1s, Tax scenarios & estimates, QBI workbench, Rental election & ownership, Itemized deductions. Module amounts feed the walk; any line can also be typed directly in the walk.
-- **Wealth strategy**, **Review & compliance** and **Library** views carried over from the workbook models.
+- **Planning** — summary dashboard with income/tax charts and comparisons, client
+  facts, income/deduction modules, Form 1040 walk, tax scenarios and estimates.
+  The walk supports five planning columns, inline retirement/HSA/IRA elections,
+  source adjustments, expandable schedules and local line explanations.
+- **Compliance and reports** — current-client source/document review, calculation
+  diagnostics, reconciliation to entered return-software amounts, and a generated
+  report with selected planning columns. Reports support Print / Save PDF, HTML
+  download and CSV. Separate training workbooks remain labeled as examples.
+- **Library and tools** — User guide and Planning guide explain the workflow and
+  dataflow; Reference library reads annual brackets and limits from the engine
+  with authority links. Audit trail identifies client, actor, before/after values
+  and reason. Settings controls themes, fonts, sizes, custom colors, row spacing,
+  borders and widths. The resizable tools rail has reorderable sections,
+  Recalculate, calculator, transfers and report links.
+- **AI analysis** — current-client calculation drivers and review items work
+  locally. OpenAI adds conversational analysis through the configured same-origin
+  server; current-client tools remain separate from the training models.
 
-The 1040 engine (`planner/src/tm-engine.js`, `tm-modules.js`) handles all filing statuses for TY2025 and TY2026, including the Schedule D worksheet, AMT, SE tax, NIIT, Additional Medicare Tax, QBI limits and the Pub. L. 119-21 changes. See [planner/README.md](planner/README.md).
+**Excel workflow:** open **Import & export**, export a versioned `.xlsx` template,
+edit its typed source tables, then import and review the recalculated preview
+before selecting **Apply reviewed import**. The workbook includes all saved
+clients, source modules, planning data, notes, compliance entries and audit history.
+Summary/comparison tabs are output copies. The default import updates complete
+client records by ID and adds new clients; full-workspace restore is a separate
+choice. Arbitrary third-party spreadsheets require column mapping and are not
+automatically imported. JSON backups use the same review workflow; API credentials
+and OAuth sessions are excluded.
+
+**Google Sheets** provides per-user OAuth and explicit preview/confirm transfers
+using the same workbook format. It requires the owner's Google Cloud setup and
+account authorization; it is not automatic background sync or an app login. See
+[Google Sheets setup](docs/planner-google-sheets.md).
+
+The 1040 engine (`planner/src/tm-engine.js`, `tm-modules.js`) supports federal
+individual planning for **TY2025 and TY2026**, including the Schedule D worksheet,
+AMT, SE tax, NIIT, Additional Medicare Tax, QBI and the enacted Pub. L. 119-21
+changes. Annual parameters are defined in code from cited IRS sources; they are
+not a live tax-law feed. Provider tests use mocked responses and do not establish
+a live OpenAI or Google connection. See [planner/README.md](planner/README.md) for
+navigation, import semantics, setup and calculation scope.
 It also opens inside the Workbench from the **Tax Master** item (`src/30-planner-page.js`).
 
 ```sh
-node --test planner/tests/engine.test.js planner/tests/tm-engine.test.js
-node planner/tests/ui-smoke.mjs      # with python3 -m http.server 8321 running
+npm run dev                         # includes optional OpenAI route
+node --test planner/tests/*.test.js planner/tests/*.test.cjs
+node planner/tests/ui-smoke.mjs http://localhost:3000
 node planner/build.mjs               # dist/tax-master.html
 ```
 

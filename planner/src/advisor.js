@@ -14,6 +14,7 @@
     'Tax Master is organized by client. Each client has Client info (filing status, year, dependents, W-2s, other income), modules (Portfolio income, Schedule C, Capital transactions with investment assets, business assets and equity compensation, Rents & royalty, Passthrough K-1s, QBI, Itemized deductions) that feed leaf inputs of a Form 1040 walk, and up to five planning columns beside the base return. A planning column has its own year, filing status, planning moves (levers) and typed line overrides. The engine computes every column: tax with the Schedule D worksheet, AMT (Form 6251), SE tax, Additional Medicare Tax, NIIT, QBI with W-2/UBIA limits, the SALT cap phase-down, Schedule 1-A and the 2026 itemized limits.',
     'Demo clients are fictional: the Doe household (TY2026, high-net-worth investor with executive equity, a rental HoldCo, private-fund K-1s and asset sales) and the Rivera household (TY2025, mapped from a Form 1040 reconciliation workpaper).',
     'Three more models come from workbooks: (1) the Rivera Form 1040 reconciliation workpaper (Review & compliance views); (2) the Doe rental holding company analysis (JD Rental Holdings LLC, TY2026) covering the §469(c)(7)(A) election and §199A aggregation; (3) a 50-strategy high-net-worth planning comparison for John Doe (Wealth strategy views).',
+    'The active client is the source of truth for the planning, client compliance, AI analysis and client report pages. Training workbook examples are separate records. Never substitute training-household numbers or their software tie-outs for the selected client. Tools identify their scope and client; if a training-only tool is unavailable in the current client workspace, use get_client_return instead. A selected line or return-analysis snapshot always refers to the active client.',
     'Each model runs in "workbook" mode (formulas exactly as built) or "corrected" mode (review fixes applied). Findings list the formula and technical issues with dollar impacts.',
     '',
     'How to answer:',
@@ -44,6 +45,57 @@
     };
   }
   function activeIndex(data) { const t = data.tm; const i = t.clients.findIndex((c) => c.id === t.active); return i < 0 ? 0 : i; }
+  const trainingRoute = (view) => /^(w-|h-)/.test(view) || ['r-props', 'r-199a', 'r-statements', 'r-469', 'c-home', 'findings', 'calendar'].includes(view);
+  function trainingContext() { return !(selectedContext && selectedContext.lineKey) && trainingRoute(TMP.state.view); }
+  function activeReturn() {
+    const c = TMP.TMV.active(), w = TMP.compute().tmw;
+    const requested = selectedContext && selectedContext.columnIndex != null ? selectedContext.columnIndex : TMP.state.view === 'ai-analysis' ? TMP.state.ui.analysisColumn : TMP.state.view === 'walk' ? TMP.state.ui.walkCol : 0;
+    const j = Math.max(0, Math.min(Number(requested) || 0, w.cols.length - 1));
+    return { c, w, j, column: w.cols[j], client: { id: c.id, name: TMP.TMV.clientLabel(c), year: w.cols[j].r.year, status: w.cols[j].r.status }, clientIndex: activeIndex(TMP.state.data) };
+  }
+  function clientScope(extra) {
+    const current = activeReturn();
+    return Object.assign({ scope: 'active-client', client: current.client, clientIndex: current.clientIndex, column: { index: current.j, name: current.column.col.name } }, extra);
+  }
+  function unavailableTraining(tool, route) {
+    return clientScope({ available: false, message: tool + ' belongs to a separate training workbook and is not this client’s data. Use get_client_return for the selected client. Open ' + route + ' only when the user explicitly wants to inspect that training example.' });
+  }
+  function questionSummary() {
+    if (!(selectedContext && selectedContext.lineKey)) return TMP.summary();
+    const { c, w } = activeReturn();
+    return [
+      'ACTIVE CLIENT RETURN CONTEXT. Use only this selected client. Separate training workbooks are not part of this analysis, even if navigation changes.',
+      'Client: ' + TMP.TMV.clientLabel(c) + ' (' + c.id + '). Current page: ' + TMP.state.view + '.',
+      'Computed columns: ' + JSON.stringify(w.cols.map(column => ({ name: column.col.name, year: column.r.year, status: column.r.status, agi: column.r.agi, taxableIncome: column.r.f.l15, totalTax: column.r.f.l24, refundOrOwed: column.r.net }))),
+      'Use get_client_return and the current-client schedule tools for supporting calculations. Client notes: ' + (c.info.notes || '')
+    ].join('\n');
+  }
+  function clientSchedule(schedule) {
+    const { c, w, j, column } = activeReturn(), r = column.r, detail = w.feeds.detail;
+    const sourceNote = 'Source records are the client’s base ledgers. The computed object reflects the selected column, including its projections, elections and adjustments.';
+    const mapped = {
+      f1040: { computed: r.f },
+      control: { computed: { year: r.year, status: r.status, agi: r.agi, totalTax: r.f.l24, refundOrOwed: r.net, effectiveRate: r.effective, marginalRate: r.marginal }, info: c.info, diagnostics: r.diag },
+      schA: { computed: r.a, source: c.mod.itemized },
+      schB: { computed: { taxableInterest: r.f.l2b, taxExemptInterest: r.f.l2a, ordinaryDividends: r.f.l3b, qualifiedDividends: r.f.l3a }, source: detail.pf },
+      schC: { computed: { schedule1Line3: r.s1.l3, selfEmploymentTax: r.se.tax, halfSeDeduction: r.se.ded }, source: detail.sc },
+      schD: { computed: r.d, source: { capital: detail.cap, equity: detail.eq } },
+      schE: { computed: { schedule1Line5: r.s1.l5 }, passive: column.passive, source: { rental: detail.rents, k1: detail.k1 } },
+      f8582: { computed: column.passive, source: { rental: detail.rents, k1: detail.k1 } },
+      schSE: { computed: r.se }, f8995: { computed: r.q, allowedDeduction: r.f.l13a }, s8812: { computed: r.k8812 },
+      sch1: { computed: r.s1, schedule1A: r.s1a }, sch2: { computed: r.s2 }, sch3: { computed: r.s3 },
+      taxCalc: { computed: { taxableIncome: r.f.l15, incomeTax: r.f.l16, regularTaxLessForeignCredit: r.amt.regular, totalTax: r.f.l24, marginalOrdinaryRate: r.marginalOrd, capitalGains: r.d, amt: r.amt, netInvestmentIncome: r.nii }, parameters: r.p },
+    };
+    const result = clientScope(Object.assign({ schedule, sourceNote }, mapped[schedule]));
+    if (schedule === 'f1040') {
+      const rows = [];
+      const flatten = list => list.forEach(row => { if (row.s) return; rows.push({ key: row.k, line: row.ln, desc: typeof row.d === 'function' ? row.d(r) : row.d, computed: r0(TMP.TMV.rowVal(row, r)), authority: row.a || undefined, leaf: row.leaf || undefined }); if (row.sub) flatten(row.sub); });
+      flatten(TMP.TMV.walkRows); result.rows = rows;
+    }
+    result.inputPrefix = 'tm.clients.' + activeIndex(TMP.state.data) + '.';
+    result.columnIndex = j;
+    return result;
+  }
   function tmMetrics(data) {
     const w = window.TM.walkClient(data.tm.clients[activeIndex(data)]);
     const out = {};
@@ -88,6 +140,9 @@
   function checkPath(path) {
     if (typeof path !== 'string' || !/^(w1040|rental|hnwi|calendar|tm)\.[\w.-]+$/.test(path)) throw new Error('Path must start with tm., w1040., rental., hnwi. or calendar. and use dot notation, for example tm.clients.0.cols.0.lv.charity or w1040.other.cashCharity');
     if (path.split('.').some(key => !key || ['__proto__', 'prototype', 'constructor'].includes(key))) throw new Error('Invalid input path.');
+    if (!trainingContext() && !path.startsWith('tm.')) throw new Error('This path belongs to a separate training workbook. Use the selected client’s tm.clients paths.');
+    const clientPath = /^tm\.clients\.(\d+)\./.exec(path);
+    if (clientPath && +clientPath[1] !== activeIndex(TMP.state.data)) throw new Error('Choose that client in the client workspace before changing its inputs.');
     const control = controlPath(path);
     const cur = TMP.getPath(TMP.state.data, path);
     if (cur === undefined && control) return control === 'adjustment' ? 0 : null;
@@ -114,7 +169,7 @@
         walkRows(TMV.walkRows, 0);
         const det = w.feeds.detail;
         return {
-          clientIndex: ci, client: { name: TMV.clientLabel(c), year: c.info.year, status: c.info.status, state: c.info.state, dependents: c.deps, priorYearTax: c.info.priorTax, priorYearAgi: c.info.priorAgi },
+          scope: 'active-client', clientIndex: ci, client: { id: c.id, name: TMV.clientLabel(c), year: c.info.year, status: c.info.status, state: c.info.state, dependents: c.deps, priorYearTax: c.info.priorTax, priorYearAgi: c.info.priorAgi },
           columns: w.cols.map((x, j) => ({ index: j === 0 ? 'base' : j - 1, name: x.col.name, year: x.col.year, status: x.col.status, growth: x.col.growth || 0, moves: x.col.lv || {}, typed: j === 0 ? c.direct : x.col.ov,
             adjustments: (j === 0 ? c.adjustments : x.col.adjustments) || {},
             elections: Object.fromEntries(Object.keys(ELECTION_FIELDS).map(key => [key, Object.assign({}, (c.elections || {})[key], (x.col.elections || {})[key])])),
@@ -128,49 +183,55 @@
     {
       name: 'get_tax_scenarios',
       description: 'Read the active client\'s Tax scenarios & estimates page: scenario names and planning moves (paths tm.clients.<i>.scen.scenarios.<j>.levers.<key>), whether it projects the next year (scen.project, scen.growth). Use get_client_return for results by column; use what_if with planning-move paths to compare.',
-      run() { const c = TMP.TMV.active(); return { clientIndex: activeIndex(TMP.state.data), project: !!c.scen.project, growth: c.scen.growth, scenarios: c.scen.scenarios, levers: window.TM.LEVERS.map((l) => ({ key: l.key, label: l.label, hint: l.hint })) }; },
+      run() { const c = TMP.TMV.active(); return clientScope({ project: !!c.scen.project, growth: c.scen.growth, scenarios: c.scen.scenarios, levers: window.TM.LEVERS.map((l) => ({ key: l.key, label: l.label, hint: l.hint })) }); },
     },
     {
       name: 'get_filing_calendar',
-      description: 'Read the compliance filing calendar for both households: due date, days away, form, what it is, what created it (compliance file or a selected strategy) and status. Status is editable at calendar.<id>.',
-      run() { return TMP.compute().calendar.map((c) => ({ id: c.id, client: c.client, form: c.form, title: c.title, due: c.due, extendedDue: c.ext, event: c.event, days: c.days, status: c.status, createdBy: c.source, amount: c.amount })); },
+      description: 'Read the separate training-workbook filing calendar only while an explicit training page is open. It is not a populated filing calendar for the active client. Calendar statuses belong to calendar.<id>.',
+      run() { if (!trainingContext()) return unavailableTraining('The workbook filing calendar', 'calendar'); return { scope: 'training-workbook', sampleData: true, households: ['Rivera', 'Doe'], entries: TMP.compute().calendar.map((c) => ({ id: c.id, client: c.client, form: c.form, title: c.title, due: c.due, extendedDue: c.ext, event: c.event, days: c.days, status: c.status, createdBy: c.source, amount: c.amount })) }; },
     },
     {
       name: 'get_1040_schedule',
-      description: 'Read one schedule of the Rivera Form 1040 workpaper in the current logic mode. Returns rows of {key, line, desc, workpaper, returnSoftware, variance, inputPath}. inputPath, when present, is the editable input behind the row (prefix it with "w1040.").',
+      description: 'Read a computed schedule for the active client and selected return column. The response identifies the client, scope, computed amounts and base source records; source records may differ from projected or adjusted column amounts. On an explicit training-workbook page only, reads the separate Rivera workpaper with software tie-out rows labeled training data. Use get_client_return for all active-client columns and editable paths.',
       inputSchema: { type: 'object', properties: { schedule: { type: 'string', enum: SCHEDS, description: 'f1040 = Form 1040 lines 1-38; control = control panel' } }, required: ['schedule'] },
       run(input) {
         const sch = String(input.schedule);
         if (!SCHEDS.includes(sch)) throw new Error('Unknown schedule. Use one of ' + SCHEDS.join(', '));
+        if (!trainingContext()) return clientSchedule(sch);
         const rows = TMP.compute().tie.rows[sch];
-        return { mode: TMP.state.settings.mode, schedule: sch, rows: rows.map((r) => ({ key: r.key, line: r.line, desc: r.desc, workpaper: r0(r.value), returnSoftware: r0(r.ret), variance: r0(r.variance), inputPath: r.input || undefined })) };
+        return { scope: 'training-workbook', sampleData: true, household: 'Rivera', mode: TMP.state.settings.mode, schedule: sch, rows: rows.map((r) => ({ key: r.key, line: r.line, desc: r.desc, workpaper: r0(r.value), returnSoftware: r0(r.ret), variance: r0(r.variance), inputPath: r.input || undefined })) };
       },
     },
     {
       name: 'get_rental_analysis',
-      description: 'Read the Doe rental holding company model: property P&L and QBI, real estate professional tests, §199A aggregation tests, the QBI deduction in both workbook and corrected logic, owner split, election value and safe-harbor enterprise hours. Inputs live under rental.* (e.g. rental.taxableIncome, rental.properties.0.rents, rental.hours.johnRP).',
+      description: 'Read the active client’s rental source records, selected-column passive limitations, Schedule E result and QBI calculation. On explicit training pages only, reads the separate Doe Rental HoldCo example, labeled training data; its inputs live under rental.*.',
       run() {
+        if (!trainingContext()) { const { c, column, w } = activeReturn(); return clientScope({ computed: { scheduleEIncome: column.r.s1.l5, passive: column.passive, qbi: column.r.q }, source: c.mod.rents, sourceCalculation: w.feeds.detail.rents, sourceNote: 'Rental source rows belong to the base client records; the computed result reflects the selected column.' }); }
         const r = TMP.compute().rent; const pick = (x) => ({ tot: x.tot, summary: Object.fromEntries(Object.entries(x.summary).map(([k, v]) => [k, typeof v === 'number' ? r0(v) : v])), owners: x.owners.map((o) => ({ name: o.name, pct: o.pct, ded: r0(o.ded), binding: o.binding })) });
-        return { mode: TMP.state.settings.mode, properties: r.cur.props, repTests: r.cur.rep, aggregation: r.cur.agg, taxableIncome: r.cur.TI, netCapitalGain: r.cur.NCG, asBuilt: pick(r.asBuilt), corrected: pick(r.corrected), election: r.corrected.election, enterprises: r.corrected.enterprises, threshold: r.cur.threshold, phaseRange: r.cur.range };
+        return { scope: 'training-workbook', sampleData: true, household: 'Doe', mode: TMP.state.settings.mode, properties: r.cur.props, repTests: r.cur.rep, aggregation: r.cur.agg, taxableIncome: r.cur.TI, netCapitalGain: r.cur.NCG, asBuilt: pick(r.asBuilt), corrected: pick(r.corrected), election: r.corrected.election, enterprises: r.corrected.enterprises, threshold: r.cur.threshold, phaseRange: r.cur.range };
       },
     },
     {
       name: 'get_strategy',
-      description: 'Read one of John Doe\'s 50 planning strategies by number: facts, mechanics, inputs G-L, benefit formula, computed benefit/low/high, costs, net, rank, conflicts and checklist steps. Input paths are hnwi.strategies.<index>.<G|H|I|J|K|L|formula|selected> where index = number - 1. Pass no=0 for a ranked list of all 50.',
+      description: 'Training workbook only: read one of John Doe\'s 50 example strategies by number, or no=0 for the ranked list. Only available on explicit training pages. These are not modeled results for the active client; use get_client_return and what_if for that client. Example input paths are hnwi.strategies.<index>.<G|H|I|J|K|L|formula|selected>.',
       inputSchema: { type: 'object', properties: { no: { type: 'integer', description: 'Strategy number 1-50, or 0 for the list' } }, required: ['no'] },
       run(input) {
+        if (!trainingContext()) return unavailableTraining('The strategy comparison', 'h-matrix');
         const no = parseInt(input.no, 10); const d = TMP.state.data.hnwi; const hn = TMP.compute().hn;
-        if (!no) return { horizonYears: d.horizon, assumptions: d.assumptions.map((a) => ({ name: a.name, value: a.value })), strategies: d.strategies.map((s) => ({ no: s.no, title: s.title, category: s.category, risk: s.risk, benefit: Math.round(hn.byNo[s.no].benefit), net: Math.round(hn.byNo[s.no].net), rank: hn.byNo[s.no].rank, selected: !!s.selected })) };
+        if (!no) return { scope: 'training-workbook', sampleData: true, household: 'Doe', horizonYears: d.horizon, assumptions: d.assumptions.map((a) => ({ name: a.name, value: a.value })), strategies: d.strategies.map((s) => ({ no: s.no, title: s.title, category: s.category, risk: s.risk, benefit: Math.round(hn.byNo[s.no].benefit), net: Math.round(hn.byNo[s.no].net), rank: hn.byNo[s.no].rank, selected: !!s.selected })) };
         const i = d.strategies.findIndex((s) => s.no === no); if (i < 0) throw new Error('Strategy numbers run from 1 to 50.');
         const s = d.strategies[i]; const x = hn.byNo[no];
-        return { index: i, strategy: s, result: { benefit: r0(x.benefit), low: r0(x.low), high: r0(x.high), oneTimeCost: x.oneTime, annualCost: x.recurring, horizonCost: x.horizonCost, net: r0(x.net), ratio: r0(x.ratio), rank: x.rank, flag: x.flag, error: x.error }, inputLabels: { G: 'Starting asset / deduction / gain', H: 'Basis or offset', I: 'Growth / return rate', J: 'Horizon years', K: 'Other input 1', L: 'Other input 2' }, checklist: d.checklist.filter((c) => c.no === no).map((c) => ({ phase: c.phase, item: c.item, cost: c.cost, status: c.status, timeline: c.timeline })) };
+        return { scope: 'training-workbook', sampleData: true, household: 'Doe', index: i, strategy: s, result: { benefit: r0(x.benefit), low: r0(x.low), high: r0(x.high), oneTimeCost: x.oneTime, annualCost: x.recurring, horizonCost: x.horizonCost, net: r0(x.net), ratio: r0(x.ratio), rank: x.rank, flag: x.flag, error: x.error }, inputLabels: { G: 'Starting asset / deduction / gain', H: 'Basis or offset', I: 'Growth / return rate', J: 'Horizon years', K: 'Other input 1', L: 'Other input 2' }, checklist: d.checklist.filter((c) => c.no === no).map((c) => ({ phase: c.phase, item: c.item, cost: c.cost, status: c.status, timeline: c.timeline })) };
       },
     },
     {
       name: 'list_findings',
-      description: 'List the review findings (formula errors and technical issues) with severity, detail, affected line and dollar impact of the correction. Optionally filter by model.',
+      description: 'Read the active client’s engine diagnostics and source-module review checks. On an explicit training-workbook page only, returns separate workbook findings labeled as training data; optional model filter applies there.',
       inputSchema: { type: 'object', properties: { model: { type: 'string', enum: ['all', 'w1040', 'rental', 'hnwi'] } } },
-      run(input) { const m = input && input.model && input.model !== 'all' ? input.model : null; return TMP.compute().findings.filter((f) => !m || f.module === m).map((f) => ({ id: f.id, model: f.module, severity: f.severity, status: f.status, title: f.title, detail: f.detail, line: f.line, impact: f.impact == null ? null : r0(f.impact) })); },
+      run(input) {
+        if (!trainingContext()) { const { column, w } = activeReturn(); return clientScope({ diagnostics: column.r.diag, moduleChecks: Object.entries(w.feeds.detail).flatMap(([module, result]) => (result && Array.isArray(result.checks) ? result.checks : []).map(check => Object.assign({ module }, check))) }); }
+        const m = input && input.model && input.model !== 'all' ? input.model : null; return { scope: 'training-workbook', sampleData: true, households: ['Rivera', 'Doe'], findings: TMP.compute().findings.filter((f) => !m || f.module === m).map((f) => ({ id: f.id, model: f.module, severity: f.severity, status: f.status, title: f.title, detail: f.detail, line: f.line, impact: f.impact == null ? null : r0(f.impact) })) };
+      },
     },
     {
       name: 'what_if',
@@ -204,7 +265,7 @@
     },
     {
       name: 'open_view',
-      description: 'Show a view to the user. Overview: home (summary dashboard), client, walk (Form 1040 walk). Modules: m-portfolio, m-schc, m-capital, m-rents, m-k1, scen (tax scenarios & estimates), m-qbi, r-469 (rental election & ownership), m-itemized. Wealth strategy: h-dash, h-matrix, h-cost, h-check. Review & compliance: c-home, w-tie, findings, calendar, w-sources, w-sched, w-review, r-props, r-199a, r-statements. Library: sources, audit, settings. For w-sched pass tab (schA, schB, schC, schD, schE, f8582, schSE, f8995, s8812, sch1, sch2, sch3, taxCalc).',
+      description: 'Show a view. Active client: clients, home, client, walk, m-portfolio, m-schc, m-capital, m-rents, m-k1, m-qbi, m-itemized, scen, c-client, c-reconcile, ai-analysis, report, data, connections, audit, guide, planning-guide, references, settings. Separate training workbooks: w-tie, w-sources, w-sched, w-review, c-home, findings, calendar, r-props, r-199a, r-statements, r-469, h-dash, h-matrix, h-cost, h-check. Open training pages only when the user explicitly requests those examples.',
       inputSchema: { type: 'object', properties: { view: { type: 'string' }, tab: { type: 'string' } }, required: ['view'] },
       run(input) { const v = String(input.view); if (!TMP.VIEWS[v]) throw new Error('Unknown view ' + v); if (input.tab) TMP.state.tab.sched = String(input.tab); TMP.go(v); return { opened: v }; },
     },
@@ -217,6 +278,7 @@
   let apiMessages = []; // full content blocks for the API connection
   let openaiInput = []; // Responses items, including encrypted reasoning and tool results
   let selectedContext = null;
+  let conversationClientId = null, conversationScope = null;
   let connection = null, connectionCheck = null;
   let accessToken = '', accessRevision = 0;
   let busy = false, ctl = null, samplePromise = null;
@@ -300,7 +362,7 @@
       '<div class="log" id="advLog" aria-live="polite"></div><div class="suggest" id="advSuggest"></div><div class="status" id="advStatus"></div>' +
       '<form id="advForm"><textarea id="advInput" rows="2" placeholder="Ask about a line, a rule or a strategy…" aria-label="Question for the advisor"></textarea><button class="btn primary" id="advSend" type="submit">Ask</button></form>';
     document.getElementById('advClose').onclick = toggle;
-    document.getElementById('advClear').onclick = () => { if (ctl) ctl.abort(); turns.length = 0; apiMessages = []; openaiInput = []; selectedContext = null; paintLog(); };
+    document.getElementById('advClear').onclick = () => { if (ctl) ctl.abort(); turns.length = 0; apiMessages = []; openaiInput = []; selectedContext = null; conversationClientId = null; conversationScope = null; paintLog(); };
     document.getElementById('advForm').onsubmit = (e) => { e.preventDefault(); if (busy) { ctl && ctl.abort(); return; } const t = document.getElementById('advInput'); const q = t.value.trim(); if (q) { t.value = ''; send(q); } };
     document.getElementById('advInput').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('advForm').requestSubmit(); } };
     paintLog(); paintSuggest(); paintStatus();
@@ -317,6 +379,8 @@
     const b = await backend();
     const openai = b === 'openai' ? await serverConnection() : null;
     el.innerHTML = openai && openai.configured ? 'OpenAI server connection' + (openai.model ? ' · ' + esc(openai.model) : '') : b === 'claude' ? 'Using your Claude account. The first question asks for permission.' : b === 'api' ? 'Using your Anthropic API key · ' + esc(TMP.state.settings.apiModel) : (connection && connection.message ? esc(connection.message) + ' <a href="#settings">Advisor Settings</a>.' : 'AI chat is not connected. Configure the server connection in <a href="#settings">Settings</a>. Line explanations work without a connection.');
+    const settingsStatus = document.getElementById('advisorServerStatus');
+    if (settingsStatus) settingsStatus.textContent = el.textContent;
   }
   function paintLog() {
     const log = document.getElementById('advLog'); if (!log) return;
@@ -358,9 +422,18 @@
     if (busy) return;
     q = String(q || '').trim();
     if (!q) return;
+    const clientId = TMP.TMV.active().id;
+    if (conversationClientId && conversationClientId !== clientId) { turns.length = 0; apiMessages = []; openaiInput = []; selectedContext = null; conversationScope = null; }
     if (context !== undefined) selectedContext = context;
-    if (selectedContext && selectedContext.lineKey && TMP.TMV.explainLine) selectedContext = TMP.TMV.explainLine(selectedContext.lineKey, selectedContext.columnIndex) || selectedContext;
-    const contextualQuestion = selectedContext ? q + '\n\n[Selected Form 1040 line and column context]\n' + (typeof selectedContext === 'string' ? selectedContext : JSON.stringify(selectedContext)) : q;
+    if (selectedContext && selectedContext.clientId && selectedContext.clientId !== clientId) selectedContext = null;
+    if (selectedContext && selectedContext.lineKey === '__return_analysis__') {
+      const library = (TMP.extensions || []).find(extension => extension.data && extension.data.aiContext && extension.data.analysis);
+      if (library) selectedContext = library.data.aiContext(library.data.analysis());
+    } else if (selectedContext && selectedContext.lineKey && TMP.TMV.explainLine) selectedContext = TMP.TMV.explainLine(selectedContext.lineKey, selectedContext.columnIndex) || selectedContext;
+    const scope = trainingContext() ? 'training:' + TMP.state.view : 'client:' + clientId;
+    if (conversationScope && conversationScope !== scope) { turns.length = 0; apiMessages = []; openaiInput = []; }
+    conversationClientId = clientId; conversationScope = scope;
+    const contextualQuestion = selectedContext ? q + '\n\n[Selected active-client return context; use this client only]\n' + (typeof selectedContext === 'string' ? selectedContext : JSON.stringify(selectedContext)) : q;
     setBusy(true); ctl = new AbortController();
     turns.push({ role: 'user', text: q });
     const bot = { role: 'assistant', text: '', tools: [], pending: true };
@@ -387,7 +460,7 @@
 
   /* ---- OpenAI server connection ---- */
   async function viaOpenAI(q, bot, signal) {
-    openaiInput.push({ role: 'user', content: '[Current state of the app]\n' + TMP.summary() + '\n\n[Question]\n' + q });
+    openaiInput.push({ role: 'user', content: '[Current state of the app]\n' + questionSummary() + '\n\n[Question]\n' + q });
     const tools = TOOLS.map(t => ({ type: 'function', name: t.name, description: t.description, parameters: t.inputSchema || { type: 'object', properties: {} }, strict: false }));
     for (let round = 0; round < 8; round++) {
       signal.throwIfAborted();
@@ -434,7 +507,7 @@
     let tools = TOOLS;
     try { const lim = await sample.limits(); if (!lim.tools) tools = null; else if (lim.tools.maxCount < TOOLS.length) tools = TOOLS.slice(0, lim.tools.maxCount); } catch (e) { /* use all */ }
     const history = turns.slice(0, -2).filter((t) => t.text).slice(-10).map((t) => ({ role: t.role, content: t.text }));
-    const input = [{ role: 'user', content: RULES + '\n\nCurrent state of the app:\n' + TMP.summary() + '\n\nAnswer in Markdown.' }, ...history, { role: 'user', content: q }];
+    const input = [{ role: 'user', content: RULES + '\n\nCurrent state of the app:\n' + questionSummary() + '\n\nAnswer in Markdown.' }, ...history, { role: 'user', content: q }];
     const opts = {
       signal, cache: false, modelTier: TMP.state.settings.advisorTier || 'default',
       onText: ({ text }) => { bot.text = text; bot.pending = false; updateLast(bot); },
@@ -452,7 +525,7 @@
   async function viaApi(q, bot, signal) {
     const s = TMP.state.settings;
     const model = (s.apiModel || 'claude-opus-5').trim();
-    apiMessages.push({ role: 'user', content: '[Current state of the app]\n' + TMP.summary() + '\n\n[Question]\n' + q });
+    apiMessages.push({ role: 'user', content: '[Current state of the app]\n' + questionSummary() + '\n\n[Question]\n' + q });
     const tools = TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema || { type: 'object', properties: {} }, eager_input_streaming: true }));
     const withFallback = /^claude-(opus-5|fable-5)/.test(model);
     for (let round = 0; round < 8; round++) {
@@ -561,5 +634,13 @@
   window.Advisor = TMP.advisor = { toggle, ask, md, tools: TOOLS, setAccessToken };
   shell();
   bindAccessToken();
-  document.addEventListener('tmp:render', () => { bindAccessToken(); if (!aside.hidden) { paintSuggest(); paintStatus(); } });
+  document.addEventListener('tmp:render', () => {
+    bindAccessToken();
+    if (conversationClientId && conversationClientId !== TMP.TMV.active().id) {
+      if (ctl) ctl.abort();
+      turns.length = 0; apiMessages = []; openaiInput = []; selectedContext = null; conversationClientId = null; conversationScope = null; paintLog();
+    }
+    if (!aside.hidden) paintSuggest();
+    if (!aside.hidden || TMP.state.view === 'settings') paintStatus();
+  });
 })();

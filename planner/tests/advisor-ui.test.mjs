@@ -95,6 +95,57 @@ try {
   assert.ok(inputs.preview > 0);
   console.log('✓ Advisor reads restored controls, previews optional inputs, validates fields, saves and clears elections');
 
+  const isolatedRequestStart = bodies.length;
+  const isolated = await page.evaluate(async () => {
+    const previous = JSON.parse(JSON.stringify(TMP.state.data.tm));
+    const go = async view => { TMP.go(view); await new Promise(resolve => setTimeout(resolve, 0)); };
+    const client = TMClientHub.createBlankClient({ name: 'Beacon Consulting client', year: 2026, status: 'single', existingClients: previous.clients });
+    client.w2.push({ employer: 'Beacon employer', wages: 143210, ssWages: 143210, fedWh: 21000, stateWh: 0 });
+    TMP.state.data.tm.clients.push(client); TMP.state.data.tm.active = client.id;
+    TMP.recalculate(); await go('ai-analysis');
+    const tool = name => Advisor.tools.find(candidate => candidate.name === name);
+    const schedules = ['f1040', 'control', 'schA', 'schB', 'schC', 'schD', 'schE', 'f8582', 'schSE', 'f8995', 's8812', 'sch1', 'sch2', 'sch3', 'taxCalc'].map(schedule => tool('get_1040_schedule').run({ schedule }));
+    const other = ['get_client_return', 'get_rental_analysis', 'list_findings', 'get_filing_calendar', 'get_tax_scenarios'].map(name => tool(name).run({}));
+    const strategy = tool('get_strategy').run({ no: 0 });
+    await go('report');
+    const reportSchedule = tool('get_1040_schedule').run({ schedule: 'f1040' });
+    const reportReturn = tool('get_client_return').run({ lines: 'all' });
+    const summary = TMP.summary();
+    const library = TMP.extensions.find(extension => extension.data && extension.data.aiContext);
+    await Advisor.ask('Explain only this current client return.', library.data.aiContext(library.data.analysis()));
+    const freshConversation = document.querySelector('#advLog').innerText;
+    // A retained line/analysis context stays attached to its client even when
+    // navigation opens a training page. Clear context to inspect the example.
+    await go('w-tie');
+    const retained = tool('get_1040_schedule').run({ schedule: 'f1040' });
+    await Advisor.ask('Continue this selected-client analysis.', library.data.aiContext(library.data.analysis()));
+    document.getElementById('advClear').click();
+    const training = tool('get_1040_schedule').run({ schedule: 'f1040' });
+    TMP.state.data.tm = previous; TMP.recalculate(); await go('home');
+    return { schedules, other, strategy, reportSchedule, reportReturn, summary, freshConversation, training, retained };
+  });
+  for (const result of [...isolated.schedules, ...isolated.other, isolated.reportSchedule, isolated.reportReturn]) {
+    assert.equal(result.scope, 'active-client');
+    assert.equal(result.client.name, 'Beacon Consulting client');
+    assert.doesNotMatch(JSON.stringify(result), /Rivera|\bDoe\b/, 'Current-client tools cannot substitute another household’s example data');
+  }
+  assert.equal(isolated.schedules.find(result => result.schedule === 'f1040').computed.l1a, 143210);
+  assert.equal(isolated.reportSchedule.computed.l1a, 143210);
+  assert.equal(isolated.strategy.available, false);
+  assert.equal(isolated.strategy.scope, 'active-client');
+  assert.doesNotMatch(isolated.summary, /Rivera|\bDoe\b/);
+  assert.match(isolated.summary, /Beacon Consulting client/);
+  assert.equal(isolated.training.scope, 'training-workbook');
+  assert.equal(isolated.training.sampleData, true);
+  assert.equal(isolated.training.household, 'Rivera');
+  assert.equal(isolated.retained.scope, 'active-client');
+  assert.equal(isolated.retained.computed.l1a, 143210);
+  assert.equal(bodies[isolatedRequestStart].input.length, 1, 'Switching clients clears prior Responses history');
+  assert.match(bodies.at(-1).input.at(-1).content, /Beacon Consulting client/);
+  assert.doesNotMatch(bodies.at(-1).input.at(-1).content, /Rivera|\bDoe\b/, 'Selected-client context excludes training summaries even on a training page');
+  assert.doesNotMatch(isolated.freshConversation, /Explain this line|Planning: max retirement/);
+  console.log('✓ All schedule, report and review tools use the current client; training examples and prior-client chat history stay separate');
+
   // The existing explicit Anthropic selection must still use its streamed loop.
   const legacyBodies = [];
   await page.route('https://api.anthropic.com/v1/messages', async route => {

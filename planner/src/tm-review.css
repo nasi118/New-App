@@ -1,0 +1,41 @@
+.review-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0 22px; }
+.review-summary strong { display: block; margin-top: 8px; font-size: 24px; font-variant-numeric: tabular-nums; }
+.review-checks { display: grid; gap: 10px; padding-left: 0; list-style: none; }
+.review-checks li { line-height: 1.6; }
+.review-reconcile-controls { display: flex; align-items: end; gap: 18px; flex-wrap: wrap; }
+.review-reconcile-controls .field { max-width: 200px; }
+.review-reconciliation td .cell { min-width: 130px; }
+.review-reconciliation td:last-child { white-space: nowrap; }
+.review-report-options summary { cursor: pointer; margin-bottom: 18px; }
+.review-report-options .field { margin: 12px 0; }
+.review-column-picker { border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin: 14px 0; display: flex; flex-wrap: wrap; gap: 12px 22px; }
+.review-column-picker label { display: inline-flex; align-items: center; gap: 7px; }
+.client-report { padding: 28px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; }
+.client-report section { margin: 28px 0; }
+.report-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line); padding-bottom: 18px; }
+.report-heading h1 { margin-bottom: 8px; }
+.report-heading h2 { margin-top: 0; font-size: 20px; }
+.report-metric { border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+.report-metric span { font-size: 13px; color: var(--muted); }
+.report-prewrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.client-report .t th { white-space: normal; }
+.client-report .t td.n { white-space: nowrap; }
+.client-report .tablewrap { max-width: 100%; }
+.client-report footer { border-top: 1px solid var(--line); padding-top: 18px; }
+@media (max-width: 900px) { .review-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-heading { flex-direction: column; } }
+@media (max-width: 500px) { .client-report { padding: 15px; } .review-summary { gap: 8px; } .review-summary strong { font-size: 20px; } }
+@media print {
+  html:has([data-view="report"]), html:has([data-view="report"]) body { color-scheme: light; background: #fff !important; color: #172436 !important; }
+  .app[data-view="report"] { display: block !important; }
+  .app[data-view="report"] > :not(.main) { display: none !important; }
+  .app[data-view="report"] .main { display: block !important; margin: 0 !important; width: 100% !important; max-width: none !important; padding: 0 !important; }
+  .app[data-view="report"] .main > :not(#content), .app[data-view="report"] #content > :not(.client-report) { display: none !important; }
+  .app[data-view="report"] .client-report { background: #fff !important; color: #172436 !important; border: 0; border-radius: 0; padding: 0; --ink: #172436; --muted: #526174; --surface: #fff; --line: #c8d1dd; }
+  .app[data-view="report"] .client-report section { break-inside: avoid; }
+  .app[data-view="report"] .client-report .tablewrap { overflow: visible; }
+  .app[data-view="report"] .client-report table { font-size: 9pt; }
+  .app[data-view="report"] .client-report th, .app[data-view="report"] .client-report td { padding: 6px; background: #fff !important; color: #172436 !important; }
+  .app[data-view="report"] .review-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  #advisor, #toast { display: none !important; }
+  @page { size: landscape; margin: 14mm; }
+}

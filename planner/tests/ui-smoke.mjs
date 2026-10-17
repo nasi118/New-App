@@ -51,10 +51,11 @@ ok((await p.textContent(".brand")).includes("Tax Master"), "brand reads Tax Mast
 ok(await p.evaluate(() => window.TMP.state.view === "home"), "the landing page is the summary dashboard");
 ok(await p.locator(".cmd .kpi").count() >= 6 && await p.locator(".cmd .income-composition").count() === 1, "dashboard shows KPIs and a reconciled income-composition chart");
 
-const navOrder = await p.$$eval("#nav .nav-group h4", (h) => h.map((x) => x.textContent));
-ok(JSON.stringify(navOrder) === JSON.stringify(["Overview", "Modules", "Wealth strategy", "Review & compliance", "Library"]), "side navigation groups in order: " + navOrder.join(", "));
-const modules = await p.$$eval("#nav .nav-group:nth-child(2) a span:first-child", (a) => a.map((x) => x.textContent));
-ok(modules[0] === "Portfolio income" && modules[2] === "Capital transactions" && modules[5] === "Tax scenarios & estimates" && modules[7] === "Rental election & ownership", "module order follows the brief");
+ok(await p.locator('[data-action="shell-workspace"][data-val="planning"][aria-pressed="true"]').count() === 1 && await p.locator('[data-action="shell-workspace"][data-val="compliance"]').count() > 0,
+  "navigation separates Planning and Compliance with collapsible groups");
+const modules = await p.$$eval('#tms-nav-planning-inputs a span:first-child', (a) => a.map((x) => x.textContent));
+ok(modules[0] === "Portfolio income" && modules[2] === "Capital transactions" && modules[4] === "Passthrough income · K-1" && await p.locator('#tms-nav-workbook-examples[hidden]').count() === 1,
+  "source modules stay grouped and separate training workbooks start collapsed");
 
 const views = ["home", "client", "walk", "m-portfolio", "m-schc", "m-capital", "m-rents", "m-k1", "scen", "m-qbi", "r-469", "m-itemized", "h-dash", "h-matrix", "h-cost", "h-check",
   "c-home", "w-tie", "findings", "calendar", "w-sources", "w-sched", "w-review", "r-props", "r-199a", "r-statements", "sources", "audit", "settings"];

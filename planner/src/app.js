@@ -28,6 +28,7 @@
   function freshData() {
     const d = clone(SEED);
     d.w1040.returnAmounts = {};
+    if (d.w1040.sch1 && d.w1040.sch1.sepIra === undefined) d.w1040.sch1.sepIra = 0;
     d.rental.scenarioPcts = d.rental.owners.map((o) => o.pct);
     d.findingStatus = {};
     d.calendar = {};
@@ -37,6 +38,8 @@
   }
 
   const state = { data: freshData(), settings: clone(DEFAULT_SETTINGS), audit: [], view: 'home', tab: {}, ui: { open: {}, filter: {}, sel: {} } };
+  const extensions = [];
+  let shellUI, dataUI;
   try {
     const raw = localStorage.getItem(STORE);
     if (raw) {
@@ -73,9 +76,14 @@
   const passChip = (ok, yes, no) => chip(ok ? 'ok' : 'bad', ok ? (yes || 'Pass') : (no || 'Fail'));
 
   /* ---------------- paths & binding ---------------- */
-  function getPath(obj, path) { return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
+  function pathKeys(path) {
+    const keys = String(path).split('.');
+    if (keys.some((key) => !key || ['__proto__', 'prototype', 'constructor'].includes(key))) throw new Error('Invalid input path.');
+    return keys;
+  }
+  function getPath(obj, path) { return pathKeys(path).reduce((o, k) => (o == null ? undefined : o[k]), obj); }
   function setPath(obj, path, val) {
-    const ks = path.split('.'); let o = obj;
+    const ks = pathKeys(path); let o = obj;
     for (let i = 0; i < ks.length - 1; i++) { if (o[ks[i]] == null) o[ks[i]] = {}; o = o[ks[i]]; }
     o[ks[ks.length - 1]] = val;
   }
@@ -98,7 +106,12 @@
     const from = getPath(root, rel);
     if (JSON.stringify(from) === JSON.stringify(value)) return { ok: true, unchanged: true };
     if (value === undefined) { const ks = rel.split('.'); const parent = getPath(root, ks.slice(0, -1).join('.')); if (parent) delete parent[ks[ks.length - 1]]; } else setPath(root, rel, value);
-    if (!/apiKey/.test(path)) state.audit.push({ ts: new Date().toISOString(), by: by || 'you', path, from: from === undefined ? null : from, to: value, note: note || '' });
+    if (!/apiKey/.test(path)) {
+      const match = /^tm\.clients\.(\d+)\./.exec(path);
+      const client = match && state.data.tm.clients[+match[1]];
+      state.audit.push({ ts: new Date().toISOString(), by: by || 'you', path, from: from === undefined ? null : from, to: value, note: note || '',
+        ...(client ? { clientId: client.id, clientName: client.info.name, recordYear: client.info.year } : {}) });
+    }
     save();
     invalidate();
     return { ok: true, from };
@@ -113,19 +126,30 @@
     save(); invalidate();
   }
   function undo(i) {
-    const a = state.audit[i]; if (!a || a.undone) return;
+    const a = state.audit[i]; if (!a || a.undone || a.noUndo) return;
     if (a.path.startsWith('ret:')) { a.undone = true; setReturnAmount(a.path.slice(4), a.from, 'you', 'Undo'); render(); return; }
     if (a.path.startsWith('findingStatus.')) { const id = a.path.split('.')[1]; state.data.findingStatus[id] = Object.assign(state.data.findingStatus[id] || {}, { status: a.from }); }
     const root = a.path.startsWith('settings.') ? state : state.data;
     if (!a.path.startsWith('findingStatus.')) { if (a.from == null && /\.(direct|ov|lv)\./.test(a.path)) { const ks = a.path.split('.'); const parent = getPath(root, ks.slice(0, -1).join('.')); if (parent) delete parent[ks[ks.length - 1]]; } else setPath(root, a.path, a.from); }
     a.undone = true;
-    state.audit.push({ ts: new Date().toISOString(), by: 'you', path: a.path, from: a.to, to: a.from, note: 'Undo' });
+    state.audit.push({ ts: new Date().toISOString(), by: 'you', path: a.path, from: a.to, to: a.from, note: 'Undo',
+      ...(a.clientId ? { clientId: a.clientId, clientName: a.clientName, recordYear: a.recordYear } : {}) });
     save(); invalidate(); render();
   }
 
   /* ---------------- compute ---------------- */
   let R = null;
   function invalidate() { R = null; }
+  function recalculate() {
+    const focused = document.activeElement;
+    if (focused && focused.matches('input,select,textarea')) focused.blur();
+    invalidate();
+    const result = compute();
+    state.ui.lastRecalculated = new Date().toISOString();
+    render();
+    toast('Recalculated ' + TMV.clientLabel(result.tmc) + ': base return and ' + (result.tmw.cols.length - 1) + ' planning columns.');
+    return result;
+  }
   function compute() {
     if (R) return R;
     const s = state.settings, d = state.data;
@@ -656,25 +680,27 @@
   const show = (v) => (v == null ? '—' : typeof v === 'number' ? v.toLocaleString('en-US', { maximumFractionDigits: 4 }) : String(v).slice(0, 60));
   VIEWS.settings = () => {
     const s = state.settings;
-    let h = head('Library', 'Settings', 'Calculation choices, the advisor connection, and your data.');
-    h += '<h2>Calculation</h2><div class="panel pad"><div class="form">' +
+    let h = head('Library', 'Settings', 'Make the workspace your own. Appearance choices do not change client tax inputs.');
+    h += shellUI ? shellUI.appearanceSettings() : '';
+    h += '<h2>Report identity</h2><div class="panel pad"><div class="form"><label class="field">Preparer' + inputText('settings.preparer', s.preparer) + '</label><label class="field">Firm' + inputText('settings.firm', s.firm) + '</label></div></div>';
+    h += '<h2>OpenAI connection</h2><div class="panel pad"><p>OpenAI connects through the app’s server. The OpenAI API key stays on the server; it is never entered in a client workbook.</p><p id="advisorServerStatus" class="small muted" role="status">Checking server connection…</p><div class="form"><label class="field">Private AI app access token<input id="in-advisor-access" type="password" autocomplete="off" placeholder="Separate app access token"></label></div><p class="small muted">For a hosted app, use the separate app access token configured on your server. It stays in memory until reload. Local line explanations and calculations work without a connection.</p><div class="tm-data-actions"><button class="btn primary" data-action="use-openai">Use OpenAI</button><a class="btn" href="#ai-analysis">Open AI analysis</a><a class="btn" href="#guide">Connection instructions</a></div></div>';
+    const connections = extensions.find((extension) => extension.settingsMarkup);
+    if (connections) h += '<h2>Google Sheets</h2><div class="panel pad">' + connections.settingsMarkup() + '<p><a class="btn" href="#connections">Connect your Google account & manage transfers</a></p></div>';
+    h += '<h2>Data & client reports</h2><div class="panel pad"><p>Download an editable Excel workbook, preview an import, or generate a client report from the active return and selected planning columns.</p><div class="tm-data-actions"><a class="btn primary" href="#data">Import & export</a><a class="btn" href="#report">Client report</a><a class="btn" href="#clients">Clients & tax years</a></div></div>';
+    h += '<details class="panel pad" style="margin-top:20px"><summary>Advanced · sample workbook calculation options</summary><p class="small muted">These options affect the separate training workbooks in the Reference library. Active-client planning, reconciliation and reports use the current Form 1040 engine and the client’s own inputs.</p><div class="form">' +
       '<label class="field">Logic' + selectBind('settings.mode', s.mode, [['corrected', 'Corrected'], ['workbook', 'Workbook as built']]) + '<span class="hint">Applies to the 1040 workpaper and the rental model</span></label>' +
       '<label class="field">Variance tolerance ($)' + inputNum('settings.tolerance', s.tolerance) + '</label>' +
       '<label class="field">Form 1040 line 16' + selectBind('settings.taxSource', s.taxSource, [['software', 'Software input'], ['engine', 'Engine (2025 MFJ)']]) + '</label>' +
       '<label class="field">Schedule 2 NIIT' + selectBind('settings.niitSource', s.niitSource, [['input', 'Typed input'], ['engine', 'Engine estimate']]) + '</label>' +
       '<label class="field">§199A threshold, 2026 MFJ' + inputNum('settings.rentalThreshold', s.rentalThreshold) + '</label>' +
       '<label class="field">§199A phase-in range' + inputNum('settings.rentalPhaseRange', s.rentalPhaseRange) + '</label>' +
-      '<label class="field">Marginal rate for loss value' + inputNum('settings.rentalMarginal', s.rentalMarginal, { pct: true, dp: 1 }) + '</label></div></div>';
-    h += '<h2>Display</h2><div class="panel pad"><div class="form"><label class="field">Theme' + selectBind('settings.theme', s.theme || 'system', [['system', 'Match the device'], ['light', 'Light'], ['dark', 'Dark']]) + '</label></div><p class="small muted" style="margin:10px 0 0">The classic Tax Planning Workbench is still available at <a href="../workbench.html">workbench.html</a>.</p></div>';
-    h += '<h2>Advisor</h2><div class="panel pad"><p class="small muted" style="margin-top:0">Automatic uses the server’s OpenAI connection when available. The OpenAI API key belongs in the server environment. On a private hosted app, enter the separate app access token provided by your administrator below. This token stays in memory until you reload. Line explanations and tax calculations also work offline. Existing Claude connections remain optional.</p><div class="form">' +
+      '<label class="field">Marginal rate for loss value' + inputNum('settings.rentalMarginal', s.rentalMarginal, { pct: true, dp: 1 }) + '</label></div></details>';
+    h += '<details class="panel pad" style="margin-top:16px"><summary>Advanced · legacy advisor providers</summary><p class="small muted">Keep an existing Claude or Anthropic connection if needed. OpenAI is the primary server connection.</p><div class="form">' +
       '<label class="field">Connection' + selectBind('settings.advisorBackend', s.advisorBackend, [['auto', 'Automatic'], ['openai', 'OpenAI · server connection'], ['claude', 'claude.ai account'], ['api', 'Anthropic API key']]) + '</label>' +
-      '<label class="field">Private AI app access token<input id="in-advisor-access" type="password" autocomplete="off" placeholder="Separate app access token"></label>' +
       '<label class="field">Depth (claude.ai)' + selectBind('settings.advisorTier', s.advisorTier, [['quick', 'Quick'], ['default', 'Balanced'], ['complex', 'Most thorough']]) + '</label>' +
       '<label class="field">Anthropic model' + inputText('settings.apiModel', s.apiModel) + '</label>' +
       '<label class="field">Anthropic API key<input id="in-apikey" type="password" autocomplete="off" data-bind="settings.apiKey" data-type="text" value="' + esc(s.apiKey) + '" placeholder="sk-ant-…"></label>' +
-      '<label class="field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="in-remember" data-bind="settings.rememberKey" data-type="bool"' + (s.rememberKey ? ' checked' : '') + '> Remember the key on this device</label></div></div>';
-    h += '<h2>Data</h2><div class="panel pad"><p class="small muted" style="margin-top:0">Your inputs are kept in this browser. Export a copy to move them to another device or keep a snapshot.</p><p style="display:flex;gap:8px;flex-wrap:wrap;margin:0"><button class="btn" data-action="export">Export data (JSON)</button><label class="btn" for="imp">Import data</label><input type="file" id="imp" accept=".json,application/json" hidden><button class="btn" data-action="reset">Reset to workbook data</button></p>' +
-      (state.ui.confirmReset ? '<div class="banner warn" style="margin:12px 0 0"><span>Reset replaces every input with the original workbook figures and clears the change log.</span><button class="btn small" data-action="reset-yes">Reset now</button><button class="btn small ghost" data-action="reset-no">Cancel</button></div>' : '') + '</div>';
+      '<label class="field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="in-remember" data-bind="settings.rememberKey" data-type="bool"' + (s.rememberKey ? ' checked' : '') + '> Remember the legacy provider key on this device</label></div></details>';
     return h;
   };
 
@@ -688,24 +714,29 @@
     const soon = r.calendar.filter((c) => c.state === 'soon' || c.state === 'overdue').length;
     const tmc = r.tmc;
     $('#clientBadge').innerHTML = '<a href="#client">' + esc(TMV.clientLabel(tmc)) + '</a><span>TY' + esc(tmc.info.year) + ' · ' + esc(TM.statusLabel(tmc.info.status)) + '</span>';
-    $('#nav').innerHTML = NAV.map((g) => '<div class="nav-group"><h4>' + esc(g.group) + '</h4>' + (g.who ? '<div class="who">' + esc(g.who) + '</div>' : '') + '<div class="nav">' +
+    $('#nav').innerHTML = shellUI ? shellUI.renderNav({ view, counts: { findings: openCount, 'w-tie': r.tie.variances, calendar: soon } }) : NAV.map((g) => '<div class="nav-group"><h4>' + esc(g.group) + '</h4>' + (g.who ? '<div class="who">' + esc(g.who) + '</div>' : '') + '<div class="nav">' +
       g.items.map(([k, t]) => '<a href="#' + k + '" class="' + (k === view ? 'on' : '') + '"' + (k === view ? ' aria-current="page"' : '') + '><span>' + esc(t) + '</span>' + (k === 'findings' && openCount ? '<span class="count">' + openCount + '</span>' : k === 'w-tie' && r.tie.variances ? '<span class="count">' + r.tie.variances + '</span>' : k === 'calendar' && soon ? '<span class="count">' + soon + '</span>' : '') + '</a>').join('') + '</div></div>').join('');
     const [g, t] = TITLES[view] || ['', ''];
     $('#crumbs').innerHTML = esc(g) + ' › <b>' + esc(t) + '</b>';
     $('#modeSeg').hidden = VIEW_WS[view] !== 'compliance';
     document.documentElement.dataset.theme = state.settings.theme === 'system' ? '' : state.settings.theme;
     if (state.settings.theme === 'system') delete document.documentElement.dataset.theme;
+    if (shellUI) shellUI.applyAppearance();
     document.querySelector('.app').dataset.view = view;
     $('#modeSeg').innerHTML = '<button data-action="mode" data-val="corrected" class="' + (state.settings.mode === 'corrected' ? 'on' : '') + '">Corrected</button><button data-action="mode" data-val="workbook" class="' + (state.settings.mode === 'workbook' ? 'on' : '') + '">As built</button>';
     const active = document.activeElement && document.activeElement.id;
     const main = $('#content');
     main.innerHTML = VIEWS[view]();
+    const tools = $('#toolsRail');
+    if (tools && shellUI) tools.innerHTML = shellUI.toolsMarkup();
     if (TMV.afterRender) TMV.afterRender();
+    extensions.forEach((extension) => { if (extension.afterRender) extension.afterRender(); });
+    if (shellUI) shellUI.afterRender();
     if (active) { const el = document.getElementById(active); if (el && main.contains(el)) { el.focus(); } }
     document.dispatchEvent(new CustomEvent('tmp:render'));
   }
   function go(view) { if (location.hash.slice(1) !== view) location.hash = view; else { state.view = view; render(); } }
-  const ALIAS = { 'p-home': 'home', 'p-rivera': 'scen' };
+  const ALIAS = { 'p-home': 'home', 'p-rivera': 'scen', sheets: 'connections', exchange: 'data', 'client-report': 'report' };
   window.addEventListener('hashchange', () => { let v = location.hash.slice(1); v = ALIAS[v] || v; if (VIEWS[v]) { state.view = v; state.ui.walkPanel = null; document.querySelector('.app').classList.remove('nav-open'); render(); window.scrollTo(0, 0); } });
 
   /* ---------------- events ---------------- */
@@ -717,6 +748,8 @@
   }
   document.addEventListener('change', (e) => {
     const el = e.target;
+    if (shellUI && shellUI.onChange(el)) return;
+    if (extensions.some((extension) => extension.onChange && extension.onChange(el))) return;
     if (TMV.onChange(el)) return;
     if (el.dataset.bind) {
       const type = el.dataset.type;
@@ -740,18 +773,20 @@
       state.audit.push({ ts: new Date().toISOString(), by: 'you', path: 'findingStatus.' + el.dataset.finding + '.status', from: prev, to: el.value, note: 'Finding status' });
       save(); invalidate(); render();
     } else if (el.id === 'imp' && el.files && el.files[0]) {
-      const fr = new FileReader();
-      fr.onload = () => { try { const o = JSON.parse(fr.result); if (!o.data || !o.data.w1040) throw new Error('bad'); state.data = o.data; if (o.settings) state.settings = Object.assign(clone(DEFAULT_SETTINGS), o.settings, { apiKey: state.settings.apiKey }); state.audit = o.audit || []; save(); invalidate(); render(); toast('Imported data from ' + el.files[0].name + '.'); } catch (err) { toast('That file is not a Tax Master Planner export.'); } };
-      fr.readAsText(el.files[0]);
+      // Older deep-linked controls use the same validated preview as Data & sync.
+      dataUI.receiveFile(el.files[0]);
     }
   });
   let qTimer;
   document.addEventListener('input', (e) => {
     const el = e.target;
+    if (shellUI && shellUI.onInput && shellUI.onInput(el)) return;
+    if (extensions.some((extension) => extension.onInput && extension.onInput(el))) return;
     if (TMV.onInput(el)) return;
     if (el.dataset.filterText) { clearTimeout(qTimer); qTimer = setTimeout(() => { state.ui.filter[el.dataset.filterText] = el.value; render(); }, 250); }
   });
   document.addEventListener('keydown', (e) => {
+    if (shellUI && shellUI.onKeydown && shellUI.onKeydown(e)) return;
     if (TMV.onKeydown && TMV.onKeydown(e)) return;
     if (e.key === 'Enter' && e.target.matches('input.cell')) { e.target.blur(); }
     if (e.key === 'Enter' && e.target.matches('tr[data-toggle]')) e.target.click();
@@ -767,6 +802,10 @@
     if (t.dataset.copy) { copyText(t.dataset.copy); return; }
     if (t.dataset.ask) { window.Advisor && window.Advisor.ask(t.dataset.ask); return; }
     const a = t.dataset.action;
+    if (shellUI && shellUI.action(a, t)) return;
+    if (extensions.some((extension) => extension.action && extension.action(a, t))) return;
+    if (a === 'recalculate') { recalculate(); return; }
+    if (a === 'use-openai') { applyChange('settings.advisorBackend', 'openai', 'you', 'Selected OpenAI server connection'); render(); return; }
     if (a === 'mode') { applyChange('settings.mode', t.dataset.val, 'you'); render(); }
     else if (TMV.action(a, t)) { /* handled by the client views */ }
     else if (a === 'add-scen-old') { const sc = state.data.w1040.planning.scenarios; if (sc.length < 5) { sc.push({ name: 'Scenario ' + (sc.length + 1), levers: {} }); state.audit.push({ ts: new Date().toISOString(), by: 'you', path: 'w1040.planning.scenarios', from: sc.length - 1, to: sc.length, note: 'Added scenario', noUndo: true }); save(); invalidate(); render(); } }
@@ -776,7 +815,7 @@
     else if (a === 'add-oi') { state.data.w1040.openItems.push({ area: '', entity: '', issue: 'New item', amount: 0, priority: 'Medium', owner: '', status: 'Open', resolution: '' }); save(); invalidate(); render(); }
     else if (a === 'sel-top') { const r = compute().hn; const top = [...r.rows].sort((x, y) => x.rank - y.rank).slice(0, 10).map((x) => x.no); state.data.hnwi.strategies.forEach((s, i) => applyChange('hnwi.strategies.' + i + '.selected', top.includes(s.no), 'you', 'Select top 10')); render(); }
     else if (a === 'sel-none') { state.data.hnwi.strategies.forEach((s, i) => { if (s.selected) applyChange('hnwi.strategies.' + i + '.selected', false, 'you', 'Clear selection'); }); render(); }
-    else if (a === 'export') saveFile('tax-master-planner-data.json', JSON.stringify({ app: 'Tax Master Planner', version: 2, exported: new Date().toISOString(), data: state.data, settings: Object.assign({}, state.settings, { apiKey: '' }), audit: state.audit }, null, 1));
+    else if (a === 'export') dataUI.action('data-json', t);
     else if (a === 'csv-tie') {
       const t2 = compute().tie.rows; const lines = [['Schedule', 'Line', 'Description', 'Workpaper', 'Return/software', 'Variance', 'Status']];
       Object.entries(t2).forEach(([k, rows]) => rows.forEach((r) => lines.push([k, r.line, r.desc, r.value.toFixed(2), n(r.ret).toFixed(2), r.variance.toFixed(2), r.ok ? 'OK' : 'Variance'])));
@@ -808,12 +847,19 @@
 
   /* ---------------- API for the advisor ---------------- */
   window.TMP = {
-    state, compute, render, go, VIEW_WS, applyChange, toast, getPath, esc, money, VIEWS, TITLES,
+    state, compute, render, go, VIEW_WS, applyChange, toast, getPath, esc, money, VIEWS, TITLES, recalculate,
     summary() {
       const r = compute(); const r0 = r; const c = r.cur; const rc = r.rent.cur; const hn = r.hn; const s = state.settings; const pl = state.data.w1040.planning;
       const top = hn.dashboard.top.slice(0, 8).map((no) => { const st = state.data.hnwi.strategies.find((x) => x.no === no); return '#' + no + ' ' + st.title + ' ' + money(hn.byNo[no].benefit) + ' (' + st.risk + ')'; });
       const tmc = r0.tmc; const tw = r0.tmw;
       const tmLine = 'ACTIVE TAX MASTER CLIENT: ' + TMV.clientLabel(tmc) + ' (' + TM.statusLabel(tmc.info.status) + ', TY' + tmc.info.year + '). Columns: ' + tw.cols.map((x) => x.col.name + ' [TY' + x.col.year + ']: AGI ' + money(x.r.agi) + ', taxable ' + money(x.r.f.l15) + ', total tax ' + money(x.r.f.l24) + (x.r.amt.amt ? ' incl. AMT ' + money(x.r.amt.amt) : '') + ', ' + (x.r.net >= 0 ? 'refund ' : 'owed ') + money(Math.abs(x.r.net))).join('; ') + '. Diagnostics: ' + tw.cols[0].r.diag.map((d) => d.line + ' ' + d.text).join(' | ');
+      const trainingView = /^(w-|h-)/.test(state.view) || ['c-home', 'findings', 'calendar', 'r-props', 'r-199a', 'r-statements', 'r-469'].includes(state.view);
+      if (!trainingView) return [
+        'ACTIVE CLIENT WORKSPACE. Answer from this client and the current source modules, return and planning columns. Separate workbook examples are not this client’s data.',
+        'Current page: ' + state.view + '. Workspace: ' + state.settings.workspace + '.', tmLine,
+        'Prior-year entered facts: tax ' + (tmc.info.priorTax == null ? 'not entered' : money(tmc.info.priorTax)) + '; AGI ' + (tmc.info.priorAgi == null ? 'not entered' : money(tmc.info.priorAgi)) + '.',
+        'Client notes: ' + (tmc.info.notes || '') + '. Use get_client_return for source, election, adjustment and planning details. Compliance and reports use the same active base return.'
+      ].join('\n');
       return [
         tmLine,
         'Today: ' + new Date().toISOString().slice(0, 10) + '. Workspace: ' + s.workspace + '. Current view: ' + (TITLES[state.view] || []).join(' > ') + '. Compliance logic mode: ' + s.mode + ' (planning always uses corrected logic).',
@@ -834,6 +880,23 @@
   NAV = [...TMV.NAV, LIB];
   NAV.forEach((g) => g.items.forEach(([k, t]) => { TITLES[k] = [g.group, t]; }));
   window.TMP.TMV = TMV;
+  const sharedAPI = { state, esc, money, moneyM, pct, fmtNum, cellNum, chip, inputNum, inputText, selectBind, head, tabs, tile, kv,
+    getPath, parseVal, compute, save, invalidate, render, go, applyChange, toast, undo, label, recalculate,
+    active: () => TMV.active(), client: () => TMV.active(), clientPath: (suffix) => 'tm.clients.' + state.data.tm.clients.indexOf(TMV.active()) + '.' + suffix,
+    walk: () => compute().tmw, walkRows: TMV.walkRows, rowVal: TMV.rowVal };
+  dataUI = window.TMDataUI && window.TMDataUI(sharedAPI);
+  if (dataUI) extensions.push(dataUI);
+  if (window.TMClientHub) extensions.push(window.TMClientHub(sharedAPI));
+  if (window.TMReview) extensions.push(window.TMReview(sharedAPI));
+  if (window.TMLibrary) extensions.push(window.TMLibrary(sharedAPI));
+  if (window.TMSheets) extensions.push(window.TMSheets(Object.assign({}, sharedAPI, { applyImportedState: (imported, options) => dataUI.applyImportedState(imported, options) })));
+  extensions.forEach((extension) => Object.assign(VIEWS, extension.VIEWS || {}));
+  shellUI = window.TMShell && window.TMShell(Object.assign({}, sharedAPI, { saveCalculatorNote: (text) => {
+    const client = TMV.active(); applyChange(sharedAPI.clientPath('notes._calculator'), ((client.notes || {})._calculator ? client.notes._calculator + '\n' : '') + text, 'you', 'Toolbox calculation tape');
+  } }));
+  window.TMP.extensions = extensions;
+  window.TMP.shell = shellUI;
+  if (shellUI && shellUI.routes) shellUI.routes().forEach((route) => { TITLES[route.key] = [route.group, route.label]; });
   const v0 = ALIAS[location.hash.slice(1)] || location.hash.slice(1); state.view = VIEWS[v0] ? v0 : wsHome();
   render();
 })();

@@ -289,7 +289,9 @@
   TM.ageAtYearEnd = (dob, year) => { const d = date(dob); return d ? year - d.getUTCFullYear() : null; };
   TM.clientCtx = function (c, year, status) {
     const info = c.info || {}; year = +(year || info.year || 2025); status = status || info.status || 'mfj';
-    const married = status === 'mfj' || status === 'qss';
+    // A surviving spouse uses joint tax brackets, but only the living taxpayer's
+    // age and blindness qualify for the return's additional deductions.
+    const married = status === 'mfj';
     const tpAge = TM.ageAtYearEnd(info.tpDob, year), spAge = married ? TM.ageAtYearEnd(info.spDob, year) : null;
     const seniors = (tpAge >= 65 ? 1 : 0) + (spAge >= 65 ? 1 : 0);
     const blind = (info.tpBlind ? 1 : 0) + (married && info.spBlind ? 1 : 0);
@@ -424,6 +426,7 @@
     2026: { deferral: 24500, catchup: 8000, superCatchup: 11250, additions: 72000, compensation: 360000, simple: 17000, simpleCatchup: 4000, simpleSuperCatchup: 5250, ira: 7500, iraCatchup: 1100, coveredSingle: [81000, 91000], coveredJoint: [129000, 149000], spouseJoint: [242000, 252000] },
   };
   TM.RETIREMENT_PLANS = [['none', 'No plan'], ['sep', 'SEP IRA'], ['solo401k', 'Solo 401(k)'], ['simple3', 'SIMPLE (3% match)'], ['simple2', 'SIMPLE (2% nonelective)'], ['profitshare', 'Profit sharing']];
+  TM.planningLimits = (year) => JSON.parse(JSON.stringify(PLANNING[TM.params(year, 'mfj').year]));
   const entered = (v) => v != null && v !== '';
   const planningConfig = (c, col, key) => Object.assign({}, (c.elections || {})[key] || {}, (col.elections || {})[key] || {});
   TM.inlinePlanning = function (client, col, input, ctx) {
@@ -541,6 +544,44 @@
       return { col, ctx, x, sourceX, r, planning: planning.details, passive: passive.detail };
     });
     return { feeds: F, baseX, cols: res };
+  };
+
+  // Scenarios are temporary walk columns. Using this same pipeline keeps
+  // elections, passive limitations and QBI identical after “Send to 1040 walk”.
+  // The client and its existing columns are never changed by this calculation.
+  TM.scenarioClient = function (c, currentWalk) {
+    c = c || {};
+    const info = c.info || {}, scenarios = c.scen || {};
+    const list = Array.isArray(scenarios.scenarios) && scenarios.scenarios.length ? scenarios.scenarios : [{ name: 'Baseline', levers: {} }];
+    const baseWalk = currentWalk || TM.walkClient(Object.assign({}, c, { cols: [] }));
+    const base = baseWalk.cols[0], proj = !!scenarios.project;
+    const year = proj ? Math.min(2026, Number(base.col.year) + 1) : Number(base.col.year);
+    const bx = proj ? TM.project(baseWalk.baseX, scenarios.growth) : Object.assign({}, baseWalk.baseX);
+    const temporary = list.map((scenario, i) => ({ id: 'scenario-' + i, name: scenario.name || (i ? 'Scenario ' + (i + 1) : 'Baseline'), year,
+      status: info.status || 'mfj', ov: {}, lv: Object.assign({}, scenario.levers || {}), growth: proj ? scenarios.growth : 0 }));
+    const computed = TM.walkClient(Object.assign({}, c, { cols: temporary }));
+    const columns = computed.cols.slice(1);
+    const res = columns.map((column, i) => {
+      const s = list[i], levers = s.levers || {}, r = column.r;
+      // Preserve the existing funding estimate: set levers count only the
+      // amount above the displayed starting input; conversions/harvests do not
+      // count as a cash contribution. This does not change any tax amount.
+      r.cash = sum(TM.LEVERS.filter((lever) => lever.key !== 'extraEst' && lever.key !== 'deferIncome'),
+        (lever) => lever.op === 'set' ? Math.max(0, n(levers[lever.key]) - n(bx[lever.leaf])) : lever.key === 'roth' || lever.key === 'harvest' ? 0 : n(levers[lever.key]));
+      return { s, r };
+    });
+    return { proj, year, bx, ctx: columns[0].ctx, res, columns, base: computed.cols[0], feeds: computed.feeds };
+  };
+
+  // Estimate the next supported year with the same temporary-column pipeline.
+  // An explicit zero growth election must not turn into the default 3% growth.
+  TM.nextYearProjection = function (c, currentWalk) {
+    const baseWalk = currentWalk || TM.walkClient(Object.assign({}, c, { cols: [] }));
+    if (Number(baseWalk.cols[0].col.year) >= 2026) throw new Error('Next-year calculation parameters are not available beyond tax year 2026.');
+    const rawGrowth = (c.scen || {}).growth;
+    const growth = rawGrowth == null || rawGrowth === '' ? 0.03 : n(rawGrowth);
+    const projection = TM.scenarioClient(Object.assign({}, c, { scen: { project: true, growth, scenarios: [{ name: 'Next-year baseline', levers: {} }] } }), baseWalk);
+    return { year: projection.year, growth, column: projection.columns[0] };
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = TM;
