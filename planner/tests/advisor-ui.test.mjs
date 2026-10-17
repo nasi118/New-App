@@ -173,6 +173,33 @@ try {
   await privatePage.evaluate(() => Advisor.ask('Explain the return.'));
   assert.equal(privatePosts, 1, 'reload clears the in-memory app token');
   console.log('✓ Hosted advisor requires an app access token; token stays in memory and same-origin authorization headers');
+
+  const racePage = await browser.newPage();
+  let releaseOldCheck, sawOldCheck;
+  const heldCheck = new Promise(resolve => { releaseOldCheck = resolve; });
+  const oldCheckStarted = new Promise(resolve => { sawOldCheck = resolve; });
+  let racePosts = 0;
+  await racePage.route('**/api/ai/chat', async route => {
+    const authorized = route.request().headers().authorization === 'Bearer ' + appToken;
+    if (route.request().method() === 'GET') {
+      if (!authorized) { sawOldCheck(); await heldCheck; }
+      return route.fulfill({ json: { provider: 'openai', configured: authorized, accessRequired: !authorized, message: authorized ? '' : 'Enter the app access token.' } });
+    }
+    assert.equal(authorized, true);
+    racePosts++;
+    await route.fulfill({ json: { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'New token wins the race.' }] }], text: 'New token wins the race.' } });
+  });
+  await racePage.goto(base + '/planner/index.html', { waitUntil: 'domcontentloaded' });
+  await oldCheckStarted;
+  await racePage.waitForFunction(() => !!window.TMP?.advisor);
+  await racePage.evaluate(() => { window.pendingTokenQuestion = Advisor.ask('Use my private advisor.'); TMP.go('settings'); });
+  await racePage.fill('#in-advisor-access', appToken);
+  await racePage.dispatchEvent('#in-advisor-access', 'change');
+  releaseOldCheck();
+  await racePage.evaluate(() => window.pendingTokenQuestion);
+  assert.equal(racePosts, 1, 'question awaiting an old configuration check retries with the newly entered token');
+  assert.match(await racePage.locator('#advLog').innerText(), /New token wins the race/);
+  console.log('✓ Delayed unauthenticated config cannot override a newly entered access token or its waiting question');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

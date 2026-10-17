@@ -235,25 +235,35 @@
     return sm ? 'claude' : (s.apiKey ? 'api' : null);
   }
   async function serverConnection() {
-    if (connection && connection.expires > Date.now()) return connection;
-    if (!connectionCheck) connectionCheck = (async () => {
+    for (;;) {
       const revision = accessRevision;
-      let result = { configured: false };
-      try {
-        if (window.location && window.location.protocol === 'file:') return result;
-        const signal = AbortSignal.timeout(5000);
-        const response = await fetch('/api/ai/chat', { signal, headers: serverHeaders(), cache: 'no-store' });
-        // Static hosts may serve the SPA HTML at an unknown API path.
-        if (response.ok && /application\/json/i.test(response.headers.get('content-type') || '')) {
-          const data = await response.json();
-          if (data.provider === 'openai') result = { configured: data.configured === true, model: data.model, message: data.message, accessRequired: data.accessRequired };
-        }
-      } catch (_) { /* local line explanations remain available */ }
-      const checked = Object.assign(result, { expires: Date.now() + 30000 });
-      if (revision === accessRevision) connection = checked;
-      return checked;
-    })().finally(() => { connectionCheck = null; });
-    return connectionCheck;
+      if (connection && connection.expires > Date.now()) return connection;
+      if (!connectionCheck || connectionCheck.revision !== revision) {
+        const check = { revision };
+        check.promise = (async () => {
+          let result = { configured: false };
+          try {
+            if (!window.location || window.location.protocol !== 'file:') {
+              const signal = AbortSignal.timeout(5000);
+              const response = await fetch('/api/ai/chat', { signal, headers: serverHeaders(), cache: 'no-store' });
+              // Static hosts may serve the SPA HTML at an unknown API path.
+              if (response.ok && /application\/json/i.test(response.headers.get('content-type') || '')) {
+                const data = await response.json();
+                if (data.provider === 'openai') result = { configured: data.configured === true, model: data.model, message: data.message, accessRequired: data.accessRequired };
+              }
+            }
+          } catch (_) { /* local line explanations remain available */ }
+          const checked = Object.assign(result, { expires: Date.now() + 30000 });
+          if (revision === accessRevision) connection = checked;
+          return checked;
+        })().finally(() => { if (connectionCheck === check) connectionCheck = null; });
+        connectionCheck = check;
+      }
+      const checked = await connectionCheck.promise;
+      // A caller already waiting on the previous token must use the current
+      // check too; an obsolete result must never answer a newly authorized ask.
+      if (revision === accessRevision) return checked;
+    }
   }
   function serverHeaders(json) {
     const headers = { accept: 'application/json' };
@@ -263,7 +273,7 @@
   }
   function setAccessToken(value) {
     accessToken = String(value || '').trim();
-    accessRevision++; connection = null; connectionCheck = null;
+    accessRevision++; connection = null;
     paintStatus();
   }
   function bindAccessToken() {
