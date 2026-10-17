@@ -1,20 +1,20 @@
 
 :root{
---ink:#101828;--ink2:#344054;--muted:#667085;--muted2:#98a2b3;
---paper:#e9edf3;--card:#fff;--line:#e4e7ec;--line2:#f1f3f6;--hdr:#f8fafc;--hover:#f5f8fd;
+--ink:#101828;--ink2:#344054;--muted:#667085;--muted2:#667085;
+--paper:#f4f6f8;--card:#fff;--line:#e4e7ec;--line2:#f1f3f6;--hdr:#f8fafc;--hover:#f5f8fd;
 --indigo:#1d4ed8;--indigo-deep:#1e40af;--indigo-bg:#eff6ff;--indigo-line:#bfdbfe;
 --green:#047857;--green-bg:#f0fdf4;--green-line:#bbf7d0;
 --amber:#b45309;--amber-bg:#fffbeb;--amber-line:#fde68a;
 --red:#b91c1c;--red-bg:#fef2f2;--red-line:#fecaca;
 --slate:#475569;--slate-bg:#f1f5f9;
 --navy:#0b1526;--navy-2:#141f36;--navy-hover:#16233c;--navy-line:#1c2942;
---navtext:#8b98ad;--navlabel:#5b6b84;
+--navtext:#cbd5e1;--navlabel:#94a3b8;
 --navw:220px;--navw-c:62px;--toolsw:300px;--toolsw-c:52px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%}
-body{font-family:'Instrument Sans',var(--app-font,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif);
-  background:var(--paper);color:var(--ink);font-size:14px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+body{font-family:var(--app-font,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif);
+  background:var(--paper);color:var(--ink);font-size:15px;line-height:1.5;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
 button{cursor:pointer;border:none;background:none}
 
@@ -118,7 +118,7 @@ button{cursor:pointer;border:none;background:none}
 
 /* ---------- tables ---------- */
 .tp-tblwrap{overflow-x:auto}
-.tp-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tp-tbl{width:100%;border-collapse:collapse;font-size:14px}
 .tp-tbl th{text-align:left;padding:8px 10px;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;
   color:var(--slate);font-weight:600;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--hdr);
   position:sticky;top:0;z-index:2}
@@ -151,7 +151,7 @@ button{cursor:pointer;border:none;background:none}
 
 /* ---------- inputs ---------- */
 .tp-money,.tp-txt{border:1px solid var(--input-line,#d0d5dd);border-radius:8px;padding:8px 10px;font-size:13.5px;background:var(--card);width:100%;min-width:0}
-.tp-money{text-align:right;color:var(--indigo);font-weight:600;font-variant-numeric:tabular-nums}
+.tp-money{text-align:right;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 .tp-money:focus,.tp-txt:focus{outline:none;border-color:var(--indigo-deep);box-shadow:0 0 0 3px rgba(30,64,175,.1)}
 .tp-money:disabled{background:var(--line2);color:var(--muted2)}
 .tp-txt.big{font-size:14px;font-weight:600}
@@ -175,7 +175,7 @@ button{cursor:pointer;border:none;background:none}
 .tp-inline{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
 .tp-btn{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:7px;padding:8px 13px}
 .tp-btn.solid{background:var(--indigo);color:#fff}
-.tp-btn.solid:hover{background:#3730a3}
+.tp-btn.solid:hover{background:var(--indigo-deep)}
 .tp-btn.ghost{border:1px solid var(--line);color:var(--ink2);background:var(--card)}
 .tp-btn.ghost:hover{background:var(--hover);color:var(--ink)}
 .tp-btn.sm{padding:5px 10px;font-size:11px}
@@ -454,7 +454,7 @@ button.tp-calc.drill:hover{background:var(--indigo-bg);color:var(--indigo)}
 .tp-calcbtn.op{background:var(--hdr);color:var(--indigo)}
 .tp-calcbtn.fn{background:var(--hdr);color:var(--muted);font-size:13px}
 .tp-calcbtn.eq{background:var(--indigo);border-color:var(--indigo);color:#fff}
-.tp-calcbtn.eq:hover{background:#3730a3}
+.tp-calcbtn.eq:hover{background:var(--indigo-deep)}
 .tp-calc-mem{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:7px}
 .tp-calc-foot{display:flex;gap:6px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line2)}
 .tp-chiprow{display:flex;flex-wrap:wrap;gap:5px}
@@ -731,10 +731,10 @@ button.tp-calc.drill:hover{background:var(--indigo-bg);color:var(--indigo)}
 
 /* ---------- calculator internals ---------- */
 .tp-hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;border-radius:10px;padding:15px 16px;
-  background:linear-gradient(135deg,var(--indigo),var(--indigo-deep));color:#fff}
-.tp-hero.green{background:linear-gradient(135deg,#059669,#047857)}
-.tp-hero.amber{background:linear-gradient(135deg,#f59e0b,#d97706)}
-.tp-hero.red{background:linear-gradient(135deg,#dc2626,#b91c1c)}
+  background:var(--hdr);border:1px solid var(--line);color:var(--ink)}
+.tp-hero.green{background:var(--green-bg);border-color:var(--green-line)}
+.tp-hero.amber{background:var(--amber-bg);border-color:var(--amber-line)}
+.tp-hero.red{background:var(--red-bg);border-color:var(--red-line)}
 .tp-hero-item{display:flex;flex-direction:column;gap:2px;min-width:0}
 .tp-hero-item strong{font-size:16.5px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.2;overflow:hidden;text-overflow:ellipsis}
 .tp-hero-item.hi strong{font-size:24px}
@@ -915,7 +915,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 /* The app root repaints background, text color and font so themed CSS
    variables set on it (per tab) re-resolve for everything inherited. */
 .tp-root{min-height:100vh;background:var(--paper);color:var(--ink);
-  font-family:var(--app-font,'Instrument Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif)}
+  font-family:var(--app-font,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif)}
 .ap-dark select,.ap-dark option{color:var(--ink);background:var(--card)}
 .ap-dark .tp-navtoggle{background:var(--card);color:var(--ink)}
 
@@ -954,7 +954,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
    text font. tabular-nums keeps financial columns aligned. */
 .tp-kpi strong, .tp-tbl th.num, .tp-tbl td.num, .tp-money, .tp-vtotal,
 .tp-cell, .tp-calc-val, .tp-calc-disp, .tp-qcalc-disp, .tp-statline strong {
-  font-family: var(--app-font-num, var(--app-font, 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif));
+  font-family: var(--app-font-num, var(--app-font, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif));
   font-variant-numeric: tabular-nums lining-nums;
 }
 .ap-numw-medium .tp-tbl td.num, .ap-numw-medium .tp-cell, .ap-numw-medium .tp-money { font-weight: 600 }
@@ -1614,8 +1614,8 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
   border-color: var(--indigo-line);
 }
 .tp-demo-arch-box.ai {
-  background: #faf5ff;
-  border-color: #e9d5ff;
+  background: var(--indigo-bg);
+  border-color: var(--indigo-line);
 }
 .tp-demo-arch-num {
   font-size: 11px;
@@ -1889,7 +1889,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 
 /* Slide 6: CTA Banner */
 .tp-demo-cta-banner {
-  background: linear-gradient(135deg, #0b1526, #1e3a8a);
+  background: var(--navy);
   border-radius: 14px;
   padding: 34px 38px;
   color: #fff;

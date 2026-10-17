@@ -260,18 +260,25 @@
     // ---------- QBI (line 13a) ----------
     const tiBefore = Math.max(0, agi - f.l12 - f.l13b);
     const items = (ctx.qbiItems || []).map((it) => ({ ...it }));
-    // Schedule C items are reduced by deductions attributable to the trade: half of SE tax, SE health insurance and retirement contributions
+    // Schedule C items are reduced by deductions attributable to the trade.
     const cItems = items.filter((it) => it.src === 'schC');
     const cBase = sum(cItems, (it) => it.gross);
     const cDelta = s1.l3 - cBase; // the walk or a planning column changed Schedule C
     if (cItems.length) cItems[0].gross = n(cItems[0].gross) + cDelta;
     else if (s1.l3) items.push({ name: 'Schedule C', src: 'schC', gross: s1.l3, w2: 0, ubia: 0, sstb: false }), cItems.push(items[items.length - 1]);
     const cTot = sum(cItems, (it) => Math.max(0, it.gross));
-    const attributable = se.ded * (se.base ? s1.l3 / se.base : 0) + L('seHealth') + L('sepIra');
-    cItems.forEach((it) => { const share = cTot > 0 ? Math.max(0, it.gross) / cTot : 1 / cItems.length; it.qbi = n(it.gross) - attributable * share; });
-    // K-1 QBI is reduced by the deductible half of SE tax on that partner's self-employment earnings
     const kSe = items.filter((it) => it.src === 'k1' && n(it.se) > 0); const kSeTot = sum(kSe, (it) => it.se);
-    kSe.forEach((it) => { it.qbi = n(it.qbi) - se.ded * (se.base ? L('seK1') / se.base : 0) * (n(it.se) / kSeTot); });
+    // Reg. 1.199A-3(b)(1)(vi): retirement deductions reduce the QBI of the
+    // businesses whose earnings fund them, proportionately. The planning
+    // contribution uses both Schedule C and K-1 SE earnings. Keep any K-1 SE
+    // earnings absent from QBI records outside the qualifying allocation.
+    // Primary source: irs.gov/irb/2019-09_IRB.
+    const retirementBase = cTot + Math.max(kSeTot, Math.max(0, L('seK1')));
+    const retirementPart = (earnings) => retirementBase > 0 ? L('sepIra') * Math.max(0, earnings) / retirementBase : 0;
+    const attributable = se.ded * (se.base ? s1.l3 / se.base : 0) + L('seHealth');
+    cItems.forEach((it) => { const share = cTot > 0 ? Math.max(0, it.gross) / cTot : 1 / cItems.length; it.qbi = n(it.gross) - attributable * share - retirementPart(n(it.gross)); });
+    // Preserve the existing half-SE-tax allocation to each partner's earnings.
+    kSe.forEach((it) => { it.qbi = n(it.qbi) - se.ded * (se.base ? L('seK1') / se.base : 0) * (n(it.se) / kSeTot) - retirementPart(n(it.se)); });
     const q = TM.qbi(items, tiBefore, f.l3a + d.ncg, L('reitPtp'), L('qbiCarry'), p);
     q.typed = x.qbiDed != null && x.qbiDed !== '';
     f.l13a = q.typed ? L('qbiDed') : r2(q.ded);

@@ -666,10 +666,11 @@
       '<label class="field">§199A phase-in range' + inputNum('settings.rentalPhaseRange', s.rentalPhaseRange) + '</label>' +
       '<label class="field">Marginal rate for loss value' + inputNum('settings.rentalMarginal', s.rentalMarginal, { pct: true, dp: 1 }) + '</label></div></div>';
     h += '<h2>Display</h2><div class="panel pad"><div class="form"><label class="field">Theme' + selectBind('settings.theme', s.theme || 'system', [['system', 'Match the device'], ['light', 'Light'], ['dark', 'Dark']]) + '</label></div><p class="small muted" style="margin:10px 0 0">The classic Tax Planning Workbench is still available at <a href="../workbench.html">workbench.html</a>.</p></div>';
-    h += '<h2>Advisor</h2><div class="panel pad"><p class="small muted" style="margin-top:0">Published on claude.ai, the advisor runs on your own Claude account and asks for permission the first time. Opened as a local file, it needs an Anthropic API key, which stays in this browser.</p><div class="form">' +
-      '<label class="field">Connection' + selectBind('settings.advisorBackend', s.advisorBackend, [['auto', 'Automatic'], ['claude', 'claude.ai account'], ['api', 'Anthropic API key']]) + '</label>' +
+    h += '<h2>Advisor</h2><div class="panel pad"><p class="small muted" style="margin-top:0">Automatic uses the server’s OpenAI connection when available. The OpenAI API key belongs in the server environment. On a private hosted app, enter the separate app access token provided by your administrator below. This token stays in memory until you reload. Line explanations and tax calculations also work offline. Existing Claude connections remain optional.</p><div class="form">' +
+      '<label class="field">Connection' + selectBind('settings.advisorBackend', s.advisorBackend, [['auto', 'Automatic'], ['openai', 'OpenAI · server connection'], ['claude', 'claude.ai account'], ['api', 'Anthropic API key']]) + '</label>' +
+      '<label class="field">Private AI app access token<input id="in-advisor-access" type="password" autocomplete="off" placeholder="Separate app access token"></label>' +
       '<label class="field">Depth (claude.ai)' + selectBind('settings.advisorTier', s.advisorTier, [['quick', 'Quick'], ['default', 'Balanced'], ['complex', 'Most thorough']]) + '</label>' +
-      '<label class="field">Model (API key)' + inputText('settings.apiModel', s.apiModel) + '</label>' +
+      '<label class="field">Anthropic model' + inputText('settings.apiModel', s.apiModel) + '</label>' +
       '<label class="field">Anthropic API key<input id="in-apikey" type="password" autocomplete="off" data-bind="settings.apiKey" data-type="text" value="' + esc(s.apiKey) + '" placeholder="sk-ant-…"></label>' +
       '<label class="field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="in-remember" data-bind="settings.rememberKey" data-type="bool"' + (s.rememberKey ? ' checked' : '') + '> Remember the key on this device</label></div></div>';
     h += '<h2>Data</h2><div class="panel pad"><p class="small muted" style="margin-top:0">Your inputs are kept in this browser. Export a copy to move them to another device or keep a snapshot.</p><p style="display:flex;gap:8px;flex-wrap:wrap;margin:0"><button class="btn" data-action="export">Export data (JSON)</button><label class="btn" for="imp">Import data</label><input type="file" id="imp" accept=".json,application/json" hidden><button class="btn" data-action="reset">Reset to workbook data</button></p>' +
@@ -699,12 +700,13 @@
     const active = document.activeElement && document.activeElement.id;
     const main = $('#content');
     main.innerHTML = VIEWS[view]();
+    if (TMV.afterRender) TMV.afterRender();
     if (active) { const el = document.getElementById(active); if (el && main.contains(el)) { el.focus(); } }
     document.dispatchEvent(new CustomEvent('tmp:render'));
   }
   function go(view) { if (location.hash.slice(1) !== view) location.hash = view; else { state.view = view; render(); } }
   const ALIAS = { 'p-home': 'home', 'p-rivera': 'scen' };
-  window.addEventListener('hashchange', () => { let v = location.hash.slice(1); v = ALIAS[v] || v; if (VIEWS[v]) { state.view = v; document.querySelector('.app').classList.remove('nav-open'); render(); window.scrollTo(0, 0); } });
+  window.addEventListener('hashchange', () => { let v = location.hash.slice(1); v = ALIAS[v] || v; if (VIEWS[v]) { state.view = v; state.ui.walkPanel = null; document.querySelector('.app').classList.remove('nav-open'); render(); window.scrollTo(0, 0); } });
 
   /* ---------------- events ---------------- */
   let toastTimer;
@@ -750,6 +752,7 @@
     if (el.dataset.filterText) { clearTimeout(qTimer); qTimer = setTimeout(() => { state.ui.filter[el.dataset.filterText] = el.value; render(); }, 250); }
   });
   document.addEventListener('keydown', (e) => {
+    if (TMV.onKeydown && TMV.onKeydown(e)) return;
     if (e.key === 'Enter' && e.target.matches('input.cell')) { e.target.blur(); }
     if (e.key === 'Enter' && e.target.matches('tr[data-toggle]')) e.target.click();
   });
@@ -825,7 +828,7 @@
   };
 
   /* ---------------- boot ---------------- */
-  const TMV = window.TMViews({ state, esc, money, moneyM, pct, fmtNum, cellNum, chip, inputNum, inputText, selectBind, head, tabs, tile, kv, getPath, compute, save, invalidate, render: () => render(), go, applyChange, toast, undo, label });
+  const TMV = window.TMViews({ state, esc, money, moneyM, pct, fmtNum, cellNum, chip, inputNum, inputText, selectBind, head, tabs, tile, kv, getPath, parseVal, compute, save, invalidate, render: () => render(), go, applyChange, toast, undo, label });
   Object.assign(VIEWS, TMV.VIEWS);
   delete VIEWS['p-home']; delete VIEWS['p-rivera'];
   NAV = [...TMV.NAV, LIB];

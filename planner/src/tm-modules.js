@@ -343,7 +343,8 @@
       const nonpassiveRent = sum(rents.rows.filter((r) => !r.passive), (r) => r.net);
       return { pas, schE: pas.net + nonpassiveRent + k1.nonpassive };
     };
-    const items = [...sc.qbiItems, ...k1.qbiItems, ...rents.qbiItems];
+    const rawItems = [...sc.qbiItems, ...k1.qbiItems, ...rents.qbiItems].map((item) => ({ ...item }));
+    const items = rawItems.map((item) => ({ ...item }));
     // Pass 1 allows no special allowance, which gives AGI without net passive losses: the MAGI of §469(i)(3)(F)
     let b = base(Infinity);
     const pass1 = TM.computeReturn(Object.assign({}, x, { schE: b.schE }), Object.assign({}, ctx, { qbiItems: items }));
@@ -358,7 +359,145 @@
     // Net investment income other than interest and dividends: passive income, royalties, passive K-1
     x.niiOther = sum(b.pas.acts, (a) => a.allowedNet) + sum(rents.rows.filter((r) => r.royalty), (r) => r.net) + (rents.rep ? 0 : sum(rents.rows.filter((r) => !r.passive && !r.royalty), (r) => r.net));
     if (opt.leafOverrides) Object.assign(x, opt.leafOverrides);
-    return { x, ctx, items, detail: { pf, sc, k1, eq, cap, rents, it, pas: b.pas, magi } };
+    return { x, ctx, items, rawItems, detail: { pf, sc, k1, eq, cap, rents, it, pas: b.pas, magi } };
+  };
+
+  // Resolve Form 8582 again from each column's completed income and elections.
+  // Keep a correction to the Schedule E/NII source separate from the activity
+  // calculation so an income change cannot freeze an old passive allowance.
+  // Pub. 925, Special $25,000 allowance / phaseout: this MAGI excludes passive
+  // activity income/loss, taxable Social Security, IRA and student-loan
+  // deductions, the half-SE-tax deduction, and RE-professional rental losses.
+  // https://www.irs.gov/publications/p925
+  TM.columnPassive = function (feeds, input, ctx, previousSource, overrides, growth) {
+    // Project the current-year source activity amounts as well as the return
+    // leaves. Otherwise rebuilding the passive source would discard growth
+    // already applied by TM.project. Carryforwards are prior-year balances.
+    const projectAmount = (value) => growth ? Math.round(n(value) * (1 + n(growth))) : n(value);
+    const rents = Object.assign({}, feeds.detail.rents, { rows: feeds.detail.rents.rows.map((row) => ({ ...row, net: projectAmount(row.net) })) });
+    const k1 = Object.assign({}, feeds.detail.k1, { rows: feeds.detail.k1.rows.map((row) => ({ ...row, ordAllowed: projectAmount(row.ordAllowed) })) });
+    k1.nonpassive = sum(k1.rows.filter((row) => !row.passive), (row) => row.ordAllowed);
+    const items = feeds.rawItems.map((item) => {
+      const projected = { ...item };
+      if (item.src === 'rent' || item.src === 'k1') {
+        projected.qbi = projectAmount(item.qbi);
+        if (item.src === 'k1') projected.se = projectAmount(item.se);
+      }
+      return projected;
+    });
+    const x = Object.assign({}, input);
+    const schEOffset = n(x.schE) - n(previousSource.schE);
+    const niiOffset = n(x.niiOther) - n(previousSource.niiOther);
+    const nonpassiveRent = sum(rents.rows.filter((row) => !row.passive), (row) => row.net);
+    const professionalLoss = sum(rents.rows.filter((row) => !row.passive && !row.royalty && row.net < 0), (row) => -row.net);
+    const magiLeaves = Object.assign({}, x, { schE: nonpassiveRent + k1.nonpassive + schEOffset + professionalLoss, iraDed: 0, studentLoan: 0, ssBenefits: 0 });
+    const probe = TM.computeReturn(magiLeaves, ctx);
+    const magi = probe.agi + probe.se.ded;
+    const passive = TM.calcPassive(rents, k1, magi, ctx.status);
+    const source = {
+      schE: passive.net + nonpassiveRent + k1.nonpassive,
+      niiOther: sum(passive.acts, (activity) => activity.allowedNet) + sum(rents.rows.filter((row) => row.royalty), (row) => row.net) + (rents.rep ? 0 : sum(rents.rows.filter((row) => !row.passive && !row.royalty), (row) => row.net)),
+    };
+    x.schE = source.schE + schEOffset;
+    x.niiOther = source.niiOther + niiOffset;
+    ['schE', 'niiOther'].forEach((key) => { if (entered(overrides[key])) x[key] = n(overrides[key]); });
+    // Suspended rental and K-1 losses do not enter current-year QBI. Start
+    // from fresh items, rather than rescaling a prior column's allowed amount.
+    items.filter((item) => item.qbi < 0 && (item.src === 'k1' || item.src === 'rent')).forEach((item) => {
+      const activity = passive.acts.find((activity) => activity.name === item.name && activity.kind === (item.src === 'rent' ? 'rental' : 'k1'));
+      if (activity && activity.net < 0) item.qbi *= Math.min(1, pos(-activity.allowedNet) / -activity.net);
+    });
+    return { x, items, detail: passive, source };
+  };
+
+  /* Inline planning elections from the original Form 1040 walk. Elections are
+     opt-in: an absent election leaves imported/module/lever amounts intact.
+     Limits match src/01-constants.js and the reference HTML. Primary sources:
+     irs.gov/pub/irs-drop/n-24-80.pdf; irs.gov/pub/irs-drop/n-25-67.pdf;
+     irs.gov/publications/p560 (self-employed contribution worksheet);
+     irs.gov/publications/p590a (IRA deduction worksheet and compensation);
+     irs.gov/publications/p969 (HSA annual limits and employer contributions).
+     This models one owner's standard defined-contribution plan and one IRA;
+     HSA maximum assumes full-year eligibility. */
+  const PLANNING = {
+    2025: { deferral: 23500, catchup: 7500, superCatchup: 11250, additions: 70000, compensation: 350000, simple: 16500, simpleCatchup: 3500, simpleSuperCatchup: 5250, ira: 7000, iraCatchup: 1000, coveredSingle: [79000, 89000], coveredJoint: [126000, 146000], spouseJoint: [236000, 246000] },
+    2026: { deferral: 24500, catchup: 8000, superCatchup: 11250, additions: 72000, compensation: 360000, simple: 17000, simpleCatchup: 4000, simpleSuperCatchup: 5250, ira: 7500, iraCatchup: 1100, coveredSingle: [81000, 91000], coveredJoint: [129000, 149000], spouseJoint: [242000, 252000] },
+  };
+  TM.RETIREMENT_PLANS = [['none', 'No plan'], ['sep', 'SEP IRA'], ['solo401k', 'Solo 401(k)'], ['simple3', 'SIMPLE (3% match)'], ['simple2', 'SIMPLE (2% nonelective)'], ['profitshare', 'Profit sharing']];
+  const entered = (v) => v != null && v !== '';
+  const planningConfig = (c, col, key) => Object.assign({}, (c.elections || {})[key] || {}, (col.elections || {})[key] || {});
+  TM.inlinePlanning = function (client, col, input, ctx) {
+    client = client || {}; col = col || {}; ctx = ctx || TM.clientCtx(client, col.year, col.status);
+    const p = TM.params(ctx.year, ctx.status), limits = PLANNING[p.year];
+    const x = Object.assign({}, input), retirement = planningConfig(client, col, 'retirement'), hsa = planningConfig(client, col, 'hsa'), ira = planningConfig(client, col, 'ira');
+    const overrides = col.base ? client.direct || {} : col.ov || {};
+    // walkClient has already resolved source corrections in input. When an
+    // election replaces a deduction, restore only that deduction's correction;
+    // doing so here also makes it available to the dependent IRA calculation.
+    const corrections = ctx.planningAdjustments || {};
+    const applyOverride = (key) => { if (entered(overrides[key])) x[key] = n(overrides[key]); };
+    const ageFor = (config) => pos(n(entered(config.age) ? config.age : ctx.tpAge));
+    const age = ageFor(retirement), superAge = age >= 60 && age <= 63;
+    const catchup = age >= 50 ? (superAge ? limits.superCatchup : limits.catchup) : 0;
+    // SE tax is calculated by the return engine, including the owner's W-2
+    // Social Security wage base. Retirement funding cannot turn a loss positive.
+    const halfSeTax = TM.computeReturn(x, ctx).se.ded;
+    const base = pos(n(x.schC) + n(x.seK1) - halfSeTax);
+    const employerCeiling = Math.min(base * 0.2, limits.compensation * 0.25);
+    const employerOnly = Math.min(employerCeiling, limits.additions, base);
+    const option = (plan, employee, employer, extra, limit) => ({ plan, id: plan, name: (TM.RETIREMENT_PLANS.find(([id]) => id === plan) || [plan, plan])[1], employee, employer, catchup: extra, total: employee + employer + extra, limit });
+    const deferral = entered(retirement.deferral) ? pos(n(retirement.deferral)) : limits.deferral;
+    const employee = Math.min(deferral, limits.deferral, base);
+    const employer = Math.min(employerCeiling, pos(Math.min(limits.additions, base) - employee));
+    // The age catch-up is available above the ordinary elective-deferral limit.
+    const extra = employee >= limits.deferral ? Math.min(catchup, pos(base - employee - employer)) : 0;
+    const simpleDeferral = entered(retirement.deferral) ? pos(n(retirement.deferral)) : limits.simple;
+    const simpleEmployee = Math.min(simpleDeferral, limits.simple, base);
+    const simpleCatchup = age >= 50 && simpleEmployee >= limits.simple ? (superAge ? limits.simpleSuperCatchup : limits.simpleCatchup) : 0;
+    const simpleOption = (plan, contribution) => {
+      const employerPart = Math.min(contribution, pos(base - simpleEmployee));
+      return option(plan, simpleEmployee, employerPart, Math.min(simpleCatchup, pos(base - simpleEmployee - employerPart)), limits.simple + contribution + simpleCatchup);
+    };
+    const options = [option('none', 0, 0, 0, 0), option('sep', 0, employerOnly, 0, limits.additions), option('solo401k', employee, employer, extra, limits.additions + catchup),
+      simpleOption('simple3', Math.min(base * 0.03, simpleEmployee + simpleCatchup)), simpleOption('simple2', 0.02 * Math.min(base, limits.compensation)), option('profitshare', 0, employerOnly, 0, limits.additions)];
+    const selected = options.find((o) => o.plan === retirement.plan);
+    if (selected) x.sepIra = selected.total + n(corrections.sepIra);
+    applyOverride('sepIra');
+    const retirementDetail = Object.assign({ configured: !!selected, plan: retirement.plan || '', age, base, halfSeTax, options, deferralLimit: limits.deferral }, selected || { name: 'Entered amount', employee: 0, employer: 0, catchup: 0, total: n(x.sepIra), limit: limits.additions + catchup }, { allowed: n(x.sepIra) });
+
+    const hsaAge = ageFor(hsa), coverage = hsa.coverage === 'family' ? 'family' : 'self';
+    const hsaLimit = (coverage === 'family' ? p.hsaFamily : p.hsaSelf) + (hsaAge >= 55 ? 1000 : 0);
+    const employerContributions = pos(n(hsa.employerContributions));
+    const remaining = pos(hsaLimit - employerContributions), hsaConfigured = ['off', 'max', 'manual'].includes(hsa.mode);
+    const hsaRequested = hsa.mode === 'max' ? remaining : hsa.mode === 'off' ? 0 : pos(n(hsa.amount));
+    if (hsaConfigured) x.hsa = Math.min(hsaRequested, remaining) + n(corrections.hsa);
+    applyOverride('hsa');
+    const hsaDetail = { configured: hsaConfigured, mode: hsa.mode || '', coverage, age: hsaAge, limit: hsaLimit, employerContributions, remaining, requested: hsaRequested, allowed: n(x.hsa), excess: pos(hsaRequested - remaining), assumption: 'Full-year HSA eligibility; one account owner catch-up.' };
+
+    const iraAge = ageFor(ira), iraLimit = limits.ira + (iraAge >= 50 ? limits.iraCatchup : 0);
+    const compensation = pos(n(x.wages) + n(x.otherEarned) + n(x.alimonyRec)) + pos(n(x.schC) + n(x.seK1) - halfSeTax - n(x.sepIra));
+    const contributionCeiling = Math.min(iraLimit, compensation);
+    const requested = entered(ira.amount) ? pos(n(ira.amount)) : contributionCeiling;
+    const contribution = Math.min(requested, contributionCeiling);
+    // Worksheet 1-1: MAGI is figured without the IRA and student-loan deductions.
+    const beforeIra = TM.computeReturn(Object.assign({}, x, { iraDed: 0 }), ctx);
+    const magi = beforeIra.agi + n(x.studentLoan);
+    const covered = ira.covered != null ? !!ira.covered : !!(selected && selected.plan !== 'none' && n(x.sepIra) > 0);
+    const spouseCovered = !!ira.spouseCovered;
+    const status = p.status === 'mfs' && ira.livedApart ? 'single' : p.status;
+    let range = null;
+    if (covered) range = status === 'mfj' || status === 'qss' ? limits.coveredJoint : status === 'mfs' ? [0, 10000] : limits.coveredSingle;
+    else if (spouseCovered && (status === 'mfj' || status === 'mfs')) range = status === 'mfs' ? [0, 10000] : limits.spouseJoint;
+    const fraction = range ? Math.max(0, Math.min(1, (range[1] - magi) / (range[1] - range[0]))) : 1;
+    // Phase the annual dollar limit first, then apply the compensation ceiling
+    // (Pub. 590-A deduction worksheet lines 4–7). Round up to $10 / $200 floor.
+    const phasedLimit = fraction > 0 ? Math.min(iraLimit, Math.max(200, Math.ceil(iraLimit * fraction / 10) * 10)) : 0;
+    const iraConfigured = ['off', 'deductible', 'nondeductible'].includes(ira.mode);
+    const deductible = ira.mode === 'deductible' ? Math.min(contribution, phasedLimit) : 0;
+    if (iraConfigured) x.iraDed = deductible + n(corrections.iraDed);
+    applyOverride('iraDed');
+    const iraDetail = { configured: iraConfigured, mode: ira.mode || '', age: iraAge, covered, spouseCovered, limit: iraLimit, compensation, contributionCeiling, requested, contribution: ira.mode === 'off' ? 0 : contribution, allowed: n(x.iraDed), deductible: n(x.iraDed), nondeductible: iraConfigured && ira.mode !== 'off' ? pos(contribution - n(x.iraDed)) : 0, excess: ira.mode === 'off' ? 0 : pos(requested - contributionCeiling), magi, range, fraction, remaining: pos(contributionCeiling - contribution) };
+    return { x, details: { retirement: retirementDetail, hsa: hsaDetail, ira: iraDetail } };
   };
 
   // All columns of a client's 1040 walk
@@ -366,17 +505,40 @@
     const info = c.info || {};
     const F = TM.feeds(c);
     const defined = (o) => Object.fromEntries(Object.entries(o || {}).filter(([, v]) => v != null && v !== ''));
-    const baseX = Object.assign({}, F.x, defined(c.direct));
+    const adjustments = (o) => Object.fromEntries(Object.entries(defined(o)).filter(([key]) => TM.LEAF[key]));
+    const baseAdjustments = adjustments(c.adjustments);
+    const add = (x, values, sign = 1) => Object.entries(values).forEach(([key, value]) => { x[key] = n(x[key]) + sign * n(value); });
+    let baseX, basePassiveSource;
     const cols = [{ id: 'base', name: info.baseName || 'Base', year: +(info.year || 2025), status: info.status || 'mfj', ov: {}, base: true }].concat(c.cols || []);
     const res = cols.map((col) => {
       const ctx = Object.assign({}, TM.clientCtx(c, col.year, col.status), { qbiItems: F.items });
-      let x = Object.assign({}, baseX);
+      let x = Object.assign({}, col.base ? F.x : baseX);
       if (col.growth) x = TM.project(x, col.growth);
       if (col.lv) x = TM.applyLevers(x, col.lv);
-      Object.assign(x, defined(col.ov));
+      const delta = col.base ? baseAdjustments : adjustments(col.adjustments);
+      add(x, delta);
+      Object.assign(x, defined(col.base ? c.direct : col.ov));
+      const electionCorrections = Object.assign({}, baseAdjustments);
+      if (!col.base) add(electionCorrections, delta);
+      const electionCtx = Object.assign({}, ctx, { planningAdjustments: electionCorrections });
+      let planning = TM.inlinePlanning(c, col, x, electionCtx);
+      x = planning.x;
+      const previousPassive = col.base ? F.x : col.growth ? TM.project(basePassiveSource, col.growth) : basePassiveSource;
+      const passive = TM.columnPassive(F, x, ctx, previousPassive, col.base ? c.direct || {} : col.ov || {}, col.growth);
+      ctx.qbiItems = passive.items;
+      // IRA deductibility depends on the now-resolved Schedule E, whereas the
+      // rental MAGI above explicitly adds the IRA deduction back.
+      planning = TM.inlinePlanning(c, col, passive.x, Object.assign({}, electionCtx, { qbiItems: passive.items }));
+      x = planning.x;
+      // A total typed on the walk is a correction to its underlying source.
+      // Source edits keep that correction intact instead of becoming hidden
+      // exact overrides. Imported legacy direct/ov totals retain their behavior.
+      const sourceX = Object.assign({}, x);
+      add(sourceX, delta, -1);
+      if (col.base) { baseX = Object.assign({}, x); basePassiveSource = passive.source; }
       const r = TM.computeReturn(x, ctx);
       r.marginal = TM.marginal(x, ctx, r);
-      return { col, ctx, x, r };
+      return { col, ctx, x, sourceX, r, planning: planning.details, passive: passive.detail };
     });
     return { feeds: F, baseX, cols: res };
   };

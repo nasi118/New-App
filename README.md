@@ -45,16 +45,15 @@ step).
 
 ### Running the app
 
-It's a fully static site — serve the repo root with any static file server:
+The calculations work with static hosting. Use the included server for connected AI:
 
 ```sh
-npm start                      # uses `serve` on http://localhost:3000
+npm start                      # Express server at http://localhost:3000; includes AI routes
 # or
 python3 -m http.server 8000
 ```
 
-Then open the printed URL. There is no build step and no runtime network
-dependency (React is vendored in `vendor/`).
+Then open the printed URL. No frontend build is needed. Calculations use vendored libraries; connected AI requires the server route and an API credential in the deployment environment.
 
 ### Tests
 

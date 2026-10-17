@@ -1,7 +1,7 @@
 /* Tax Master — AI tax advisor.
- * Two connections:
+ * OpenAI:   same-origin server endpoint; no browser credential
  *   claude.ai: the artifact runtime's `sample` capability (viewer's own Claude account, page tools)
- *   API key:   Anthropic Messages API from the browser, streamed, with the same page tools
+ *   API key:   legacy Anthropic Messages API connection, with the same page tools
  */
 (function () {
   'use strict';
@@ -51,9 +51,46 @@
     return out;
   }
   function parseValue(v) { if (typeof v === 'number' || typeof v === 'boolean') return v; const s = String(v).trim(); if (/^(true|false)$/i.test(s)) return /^true$/i.test(s); const x = s.replace(/[$,]/g, ''); return x !== '' && isFinite(+x) ? +x : s; }
+  const ELECTION_FIELDS = {
+    retirement: { plan: ['', 'none', 'sep', 'solo401k', 'simple3', 'simple2', 'profitshare'], age: 'age', deferral: 'amount' },
+    hsa: { mode: ['', 'off', 'max', 'manual'], coverage: ['self', 'family'], age: 'age', employerContributions: 'amount', amount: 'amount' },
+    ira: { mode: ['', 'off', 'deductible', 'nondeductible'], age: 'age', amount: 'amount', covered: 'boolean', spouseCovered: 'boolean', livedApart: 'boolean' }
+  };
+  function controlPath(path) {
+    const match = /^tm\.clients\.(\d+)\.(?:cols\.(\d+)\.)?(adjustments|elections)\.(.+)$/.exec(path);
+    if (!match) return null;
+    const client = TMP.state.data.tm.clients[+match[1]];
+    if (!client || match[2] !== undefined && !client.cols[+match[2]]) throw new Error('Unknown client or planning column.');
+    if (match[3] === 'adjustments') {
+      if (!Object.prototype.hasOwnProperty.call(window.TM.LEAF, match[4])) throw new Error('Unknown Form 1040 adjustment leaf.');
+      return 'adjustment';
+    }
+    const [group, field, extra] = match[4].split('.');
+    if (extra || !Object.prototype.hasOwnProperty.call(ELECTION_FIELDS, group) || !Object.prototype.hasOwnProperty.call(ELECTION_FIELDS[group], field)) throw new Error('Unknown planning election field.');
+    return ELECTION_FIELDS[group][field];
+  }
+  function inputValue(path, value) {
+    const type = controlPath(path);
+    if (type && value === null) return undefined; // clear the optional input
+    const parsed = parseValue(value);
+    if (type === 'adjustment' && parsed === '') return undefined;
+    if (Array.isArray(type) && !type.includes(parsed)) throw new Error('Unsupported election value for ' + path + '.');
+    if (type === 'boolean' && typeof parsed !== 'boolean') throw new Error(path + ' requires true or false.');
+    if (['adjustment', 'amount', 'age'].includes(type) && (typeof parsed !== 'number' || !Number.isFinite(parsed) || type !== 'adjustment' && parsed < 0 || type === 'age' && parsed > 120)) throw new Error(path + ' requires a valid ' + (type === 'adjustment' ? 'number.' : type === 'age' ? 'age from 0 to 120.' : 'nonnegative amount.'));
+    return parsed;
+  }
+  function setCopyValue(data, path, value) {
+    const keys = path.split('.'); let target = data;
+    for (let i = 0; i < keys.length - 1; i++) target = target[keys[i]] || (target[keys[i]] = {});
+    if (value === undefined) delete target[keys[keys.length - 1]];
+    else target[keys[keys.length - 1]] = value;
+  }
   function checkPath(path) {
     if (typeof path !== 'string' || !/^(w1040|rental|hnwi|calendar|tm)\.[\w.-]+$/.test(path)) throw new Error('Path must start with tm., w1040., rental., hnwi. or calendar. and use dot notation, for example tm.clients.0.cols.0.lv.charity or w1040.other.cashCharity');
+    if (path.split('.').some(key => !key || ['__proto__', 'prototype', 'constructor'].includes(key))) throw new Error('Invalid input path.');
+    const control = controlPath(path);
     const cur = TMP.getPath(TMP.state.data, path);
+    if (cur === undefined && control) return control === 'adjustment' ? 0 : null;
     if (cur === undefined && /^calendar\./.test(path)) return 'Not started';
     if (cur === undefined && /^w1040\.planning\.scenarios\.\d+\.levers\.\w+$/.test(path)) return 0;
     if (cur === undefined && /^tm\.clients\.\d+\.(direct|cols\.\d+\.(ov|lv)|scen\.scenarios\.\d+\.levers|other)\.\w+$/.test(path)) return null;
@@ -69,7 +106,7 @@
   const TOOLS = [
     {
       name: 'get_client_return',
-      description: 'Read the active Tax Master client\'s Form 1040 walk: client facts, every column (base and planning) with its year, filing status, planning moves and typed overrides, each 1040 line with its value per column, diagnostics and module checks. Editable paths (prefix "tm.clients.<clientIndex>."): base typed line = direct.<leaf>; planning column j (0-based, excluding base) typed line = cols.<j>.ov.<leaf>, planning move = cols.<j>.lv.<sepIra|hsa|charity|harvest|roth|schCExpense|deferIncome|extraEst>, growth = cols.<j>.growth, year = cols.<j>.year, status = cols.<j>.status. Module inputs live under mod.* (for example mod.itemized.charityCash, mod.schC.businesses.0.gross).',
+      description: 'Read the active client and every Form 1040 column, including amounts, source subtotals, direct adjustments, effective elections, retirement/HSA/IRA calculations, passive-activity detail and diagnostics. Editable paths (prefix tm.clients.<clientIndex>.): base adjustments.<leaf>; planning column j (0-based) cols.<j>.adjustments.<leaf>. Election paths: elections.<retirement|hsa|ira>.<field>, or cols.<j>.elections.<group>.<field>. Retirement fields: plan (none, sep, solo401k, simple3, simple2, profitshare), age, deferral. HSA: mode (off, max, manual), coverage (self, family), age, employerContributions, amount. IRA: mode (off, deductible, nondeductible), age, amount, covered, spouseCovered, livedApart. Null clears an optional adjustment or election. Legacy totals: direct.<leaf>, cols.<j>.ov.<leaf>. Planning moves: cols.<j>.lv.<sepIra|hsa|charity|harvest|roth|schCExpense|deferIncome|extraEst>; growth, year, status live on cols.<j>. Module inputs: mod.* (for example mod.itemized.charityCash).',
       inputSchema: { type: 'object', properties: { lines: { type: 'string', enum: ['summary', 'all'], description: 'summary = key lines only (default); all = every line incl. sub-lines' } } },
       run(input) {
         const TMV = TMP.TMV; const c = TMV.active(); const ci = activeIndex(TMP.state.data); const w = TMP.compute().tmw;
@@ -78,7 +115,11 @@
         const det = w.feeds.detail;
         return {
           clientIndex: ci, client: { name: TMV.clientLabel(c), year: c.info.year, status: c.info.status, state: c.info.state, dependents: c.deps, priorYearTax: c.info.priorTax, priorYearAgi: c.info.priorAgi },
-          columns: w.cols.map((x, j) => ({ index: j === 0 ? 'base' : j - 1, name: x.col.name, year: x.col.year, status: x.col.status, growth: x.col.growth || 0, moves: x.col.lv || {}, typed: j === 0 ? c.direct : x.col.ov, totalTax: r0(x.r.f.l24), effectiveRate: r0(x.r.effective), marginalRate: r0(x.r.marginal), refundOrOwed: r0(x.r.net), amt: { amti: r0(x.r.amt.amti), exemption: r0(x.r.amt.exemption), tmt: r0(x.r.amt.tmt), amt: r0(x.r.amt.amt) } })),
+          columns: w.cols.map((x, j) => ({ index: j === 0 ? 'base' : j - 1, name: x.col.name, year: x.col.year, status: x.col.status, growth: x.col.growth || 0, moves: x.col.lv || {}, typed: j === 0 ? c.direct : x.col.ov,
+            adjustments: (j === 0 ? c.adjustments : x.col.adjustments) || {},
+            elections: Object.fromEntries(Object.keys(ELECTION_FIELDS).map(key => [key, Object.assign({}, (c.elections || {})[key], (x.col.elections || {})[key])])),
+            planning: x.planning, sourceX: x.sourceX, passive: x.passive, diagnostics: x.r.diag,
+            totalTax: r0(x.r.f.l24), effectiveRate: r0(x.r.effective), marginalRate: r0(x.r.marginal), refundOrOwed: r0(x.r.net), amt: { amti: r0(x.r.amt.amti), exemption: r0(x.r.amt.exemption), tmt: r0(x.r.amt.tmt), amt: r0(x.r.amt.amt) } })),
           lines: flat.map((row) => ({ line: row.ln, desc: typeof row.d === 'function' ? row.d(w.cols[0].r) : row.d, authority: row.a || undefined, leaf: row.leaf || undefined, values: w.cols.map((x) => r0(TMV.rowVal(row, x.r))) })),
           diagnostics: w.cols[0].r.diag, moduleChecks: [].concat(det.pf.checks, det.sc.checks, det.cap.checks, det.eq.checks, det.k1.checks, det.rents.checks),
         };
@@ -139,7 +180,7 @@
         const changes = Array.isArray(input.changes) ? input.changes : [];
         if (!changes.length) throw new Error('Pass at least one change.');
         const before = metrics(TMP.state.data); const data = clone(TMP.state.data);
-        changes.forEach((c) => { checkPath(c.path); const ks = c.path.split('.'); let o = data; for (let i = 0; i < ks.length - 1; i++) o = o[ks[i]]; o[ks[ks.length - 1]] = parseValue(c.value); });
+        changes.forEach((c) => { checkPath(c.path); setCopyValue(data, c.path, inputValue(c.path, c.value)); });
         const after = metrics(data);
         const out = { mode: TMP.state.settings.mode, changes, changed: diff(before, after) };
         const sNo = changes.map((c) => /^hnwi\.strategies\.(\d+)\./.exec(c.path)).filter(Boolean).map((m) => +m[1] + 1);
@@ -152,8 +193,8 @@
       description: 'Change one input in the client file and recalculate. Only use when the user asked for the change. The change is logged as made by the advisor and can be undone. Returns key results before and after.',
       inputSchema: { type: 'object', properties: { path: { type: 'string' }, value: {}, reason: { type: 'string', description: 'Short note for the change log' } }, required: ['path', 'value'] },
       run(input) {
-        const from = checkPath(input.path); const value = parseValue(input.value);
-        if (typeof from === 'number' && typeof value !== 'number') throw new Error(input.path + ' needs a number.');
+        const from = checkPath(input.path); const value = inputValue(input.path, input.value);
+        if (typeof from === 'number' && typeof value !== 'number' && value !== undefined) throw new Error(input.path + ' needs a number.');
         const before = metrics(TMP.state.data);
         TMP.applyChange(input.path, value, 'advisor', String(input.reason || '').slice(0, 120));
         TMP.render();
@@ -174,6 +215,10 @@
   /* ---------------- UI ---------------- */
   const turns = []; // {role, text}
   let apiMessages = []; // full content blocks for the API connection
+  let openaiInput = []; // Responses items, including encrypted reasoning and tool results
+  let selectedContext = null;
+  let connection = null, connectionCheck = null;
+  let accessToken = '', accessRevision = 0;
   let busy = false, ctl = null, samplePromise = null;
   const aside = document.getElementById('advisor');
   function sampleFn() {
@@ -183,9 +228,47 @@
   async function backend() {
     const s = TMP.state.settings;
     if (s.advisorBackend === 'api') return s.apiKey ? 'api' : null;
+    if (s.advisorBackend === 'openai') return (await serverConnection()).configured ? 'openai' : null;
+    if (s.advisorBackend !== 'claude' && (await serverConnection()).configured) return 'openai';
     const sm = await sampleFn();
     if (s.advisorBackend === 'claude') return sm ? 'claude' : null;
     return sm ? 'claude' : (s.apiKey ? 'api' : null);
+  }
+  async function serverConnection() {
+    if (connection && connection.expires > Date.now()) return connection;
+    if (!connectionCheck) connectionCheck = (async () => {
+      const revision = accessRevision;
+      let result = { configured: false };
+      try {
+        if (window.location && window.location.protocol === 'file:') return result;
+        const signal = AbortSignal.timeout(5000);
+        const response = await fetch('/api/ai/chat', { signal, headers: serverHeaders(), cache: 'no-store' });
+        // Static hosts may serve the SPA HTML at an unknown API path.
+        if (response.ok && /application\/json/i.test(response.headers.get('content-type') || '')) {
+          const data = await response.json();
+          if (data.provider === 'openai') result = { configured: data.configured === true, model: data.model, message: data.message, accessRequired: data.accessRequired };
+        }
+      } catch (_) { /* local line explanations remain available */ }
+      const checked = Object.assign(result, { expires: Date.now() + 30000 });
+      if (revision === accessRevision) connection = checked;
+      return checked;
+    })().finally(() => { connectionCheck = null; });
+    return connectionCheck;
+  }
+  function serverHeaders(json) {
+    const headers = { accept: 'application/json' };
+    if (json) headers['content-type'] = 'application/json';
+    if (accessToken) headers.authorization = 'Bearer ' + accessToken;
+    return headers;
+  }
+  function setAccessToken(value) {
+    accessToken = String(value || '').trim();
+    accessRevision++; connection = null; connectionCheck = null;
+    paintStatus();
+  }
+  function bindAccessToken() {
+    const input = document.getElementById('in-advisor-access');
+    if (input) { input.value = accessToken; input.onchange = () => setAccessToken(input.value); }
   }
   const SUGGEST = {
     t: ['Which planning column should we recommend, and why?', 'Why does AMT apply in the base column, and how could we reduce it?', 'What would harvesting another $100,000 of losses save?'],
@@ -197,11 +280,11 @@
     x: ['Summarize the high-severity findings', 'What should I fix first in the 1040 workpaper?', 'Explain the rental election in plain terms'],
   };
   function shell() {
-    aside.innerHTML = '<header><div style="flex:1"><h2>Tax advisor</h2><p id="advSub">Asks Claude about the figures on screen</p></div><button class="btn small ghost" id="advClear" title="Start a new conversation">New</button><button class="btn small ghost" id="advClose" aria-label="Close advisor">Close</button></header>' +
+    aside.innerHTML = '<header><div style="flex:1"><h2>Tax advisor</h2><p id="advSub">Discuss the return, selected line, or planning scenario</p></div><button class="btn small ghost" id="advClear" title="Start a new conversation">New</button><button class="btn small ghost" id="advClose" aria-label="Close advisor">Close</button></header>' +
       '<div class="log" id="advLog" aria-live="polite"></div><div class="suggest" id="advSuggest"></div><div class="status" id="advStatus"></div>' +
       '<form id="advForm"><textarea id="advInput" rows="2" placeholder="Ask about a line, a rule or a strategy…" aria-label="Question for the advisor"></textarea><button class="btn primary" id="advSend" type="submit">Ask</button></form>';
     document.getElementById('advClose').onclick = toggle;
-    document.getElementById('advClear').onclick = () => { if (ctl) ctl.abort(); turns.length = 0; apiMessages = []; paintLog(); };
+    document.getElementById('advClear').onclick = () => { if (ctl) ctl.abort(); turns.length = 0; apiMessages = []; openaiInput = []; selectedContext = null; paintLog(); };
     document.getElementById('advForm').onsubmit = (e) => { e.preventDefault(); if (busy) { ctl && ctl.abort(); return; } const t = document.getElementById('advInput'); const q = t.value.trim(); if (q) { t.value = ''; send(q); } };
     document.getElementById('advInput').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('advForm').requestSubmit(); } };
     paintLog(); paintSuggest(); paintStatus();
@@ -216,7 +299,8 @@
   async function paintStatus() {
     const el = document.getElementById('advStatus'); if (!el) return;
     const b = await backend();
-    el.innerHTML = b === 'claude' ? 'Using your Claude account. The first question asks for permission.' : b === 'api' ? 'Using your Anthropic API key · ' + esc(TMP.state.settings.apiModel) : 'Not connected. Open this page on claude.ai, or add an Anthropic API key in <a href="#settings">Settings</a>.';
+    const openai = b === 'openai' ? await serverConnection() : null;
+    el.innerHTML = openai && openai.configured ? 'OpenAI server connection' + (openai.model ? ' · ' + esc(openai.model) : '') : b === 'claude' ? 'Using your Claude account. The first question asks for permission.' : b === 'api' ? 'Using your Anthropic API key · ' + esc(TMP.state.settings.apiModel) : (connection && connection.message ? esc(connection.message) + ' <a href="#settings">Advisor Settings</a>.' : 'AI chat is not connected. Configure the server connection in <a href="#settings">Settings</a>. Line explanations work without a connection.');
   }
   function paintLog() {
     const log = document.getElementById('advLog'); if (!log) return;
@@ -232,24 +316,94 @@
   function setBusy(b) { busy = b; const btn = document.getElementById('advSend'); if (btn) { btn.textContent = b ? 'Stop' : 'Ask'; btn.classList.toggle('primary', !b); } }
 
   function toggle() { const app = document.querySelector('.app'); const open = !app.classList.contains('advisor-open'); app.classList.toggle('advisor-open', open); aside.hidden = !open; if (open) { paintStatus(); paintSuggest(); setTimeout(() => { const i = document.getElementById('advInput'); i && i.focus(); }, 50); } }
-  function ask(q) { const app = document.querySelector('.app'); if (!app.classList.contains('advisor-open')) toggle(); send(q); }
+  function ask(q, context) { const app = document.querySelector('.app'); if (!app.classList.contains('advisor-open')) toggle(); return send(q, context === undefined ? null : context); }
 
-  async function send(q) {
+  function localExplanation(context) {
+    if (!context || typeof context !== 'object' || !context.lineKey || !Number.isFinite(context.value)) return '';
+    const lines = [
+      '**Local calculation explanation**',
+      'Line ' + context.line + ' · ' + context.label + ' · ' + context.column + (context.year ? ' · TY' + context.year : ''),
+      '**Current amount: ' + TMP.money(context.value) + '**' + (context.status ? ' · ' + context.status : ''),
+      context.how || 'This amount comes from the current tax engine and client inputs.'
+    ];
+    const values = (title, rows) => {
+      if (!Array.isArray(rows) || !rows.length) return;
+      lines.push('**' + title + '**', rows.map(row => '- ' + row.label + ': ' + TMP.money(row.value)).join('\n'));
+    };
+    values('Calculation detail', context.details);
+    values('Source detail', context.sources);
+    if (context.authority) lines.push('**Authority:** ' + context.authority);
+    if (Array.isArray(context.diagnostics) && context.diagnostics.length) lines.push('**Review items**', context.diagnostics.map(item => '- ' + item.text).join('\n'));
+    if (Array.isArray(context.changes) && context.changes.length) lines.push('**What changes this line**', context.changes.map(text => '- ' + text).join('\n'));
+    return lines.join('\n\n');
+  }
+
+  async function send(q, context) {
     if (busy) return;
-    const b = await backend();
+    q = String(q || '').trim();
+    if (!q) return;
+    if (context !== undefined) selectedContext = context;
+    if (selectedContext && selectedContext.lineKey && TMP.TMV.explainLine) selectedContext = TMP.TMV.explainLine(selectedContext.lineKey, selectedContext.columnIndex) || selectedContext;
+    const contextualQuestion = selectedContext ? q + '\n\n[Selected Form 1040 line and column context]\n' + (typeof selectedContext === 'string' ? selectedContext : JSON.stringify(selectedContext)) : q;
+    setBusy(true); ctl = new AbortController();
     turns.push({ role: 'user', text: q });
     const bot = { role: 'assistant', text: '', tools: [], pending: true };
     turns.push(bot); paintLog();
-    if (!b) { bot.pending = false; bot.error = 'The advisor is not connected. Open this page on claude.ai, or add an Anthropic API key in Settings.'; updateLast(bot); return; }
-    setBusy(true); ctl = new AbortController();
     try {
-      if (b === 'claude') await viaClaude(q, bot, ctl.signal); else await viaApi(q, bot, ctl.signal);
+      const b = await backend();
+      ctl.signal.throwIfAborted();
+      if (!b) {
+        bot.text = localExplanation(selectedContext);
+        if (bot.text) bot.note = 'Calculated locally from the current return. Connect OpenAI in Settings for a conversational answer.';
+        else bot.error = connection && connection.message || 'AI chat is not connected. Configure OPENAI_API_KEY in the server environment. You can still use the line explanations and all tax calculations.';
+        return;
+      }
+      if (b === 'openai') await viaOpenAI(contextualQuestion, bot, ctl.signal);
+      else if (b === 'claude') await viaClaude(contextualQuestion, bot, ctl.signal);
+      else await viaApi(contextualQuestion, bot, ctl.signal);
     } catch (e) {
       if (e && e.code === 'cancelled' || (e && e.name === 'AbortError')) { bot.note = 'Stopped.'; if (e.text) bot.text = e.text; }
       else { bot.error = errorText(e); if (e && e.text) bot.text = e.text; }
     } finally {
       bot.pending = false; updateLast(bot); setBusy(false); ctl = null;
     }
+  }
+
+  /* ---- OpenAI server connection ---- */
+  async function viaOpenAI(q, bot, signal) {
+    openaiInput.push({ role: 'user', content: '[Current state of the app]\n' + TMP.summary() + '\n\n[Question]\n' + q });
+    const tools = TOOLS.map(t => ({ type: 'function', name: t.name, description: t.description, parameters: t.inputSchema || { type: 'object', properties: {} }, strict: false }));
+    for (let round = 0; round < 8; round++) {
+      signal.throwIfAborted();
+      const response = await fetch('/api/ai/chat', {
+        method: 'POST', headers: serverHeaders(true),
+        body: JSON.stringify({ instructions: RULES, input: openaiInput, tools }), signal
+      });
+      if (!/application\/json/i.test(response.headers.get('content-type') || '')) throw new Error('The AI server route is unavailable. Run the app with its Node server or deploy the API routes.');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'The AI request failed (' + response.status + ').');
+      if (!Array.isArray(data.output)) throw new Error('The AI server returned an unreadable response.');
+      // Preserve the entire Responses output, including reasoning, before tools.
+      openaiInput.push(...data.output);
+      if (data.text) { bot.text += (bot.text ? '\n\n' : '') + data.text; bot.pending = false; updateLast(bot); }
+      if (data.truncated) { bot.note = 'The answer reached its length limit. Ask a narrower question.'; return; }
+      const calls = data.output.filter(item => item.type === 'function_call');
+      if (!calls.length) return;
+      for (const call of calls) {
+        signal.throwIfAborted();
+        let output;
+        try {
+          const tool = TOOLS.find(t => t.name === call.name);
+          if (!tool) throw new Error('Unknown advisor tool.');
+          const args = JSON.parse(call.arguments);
+          if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Invalid tool arguments.');
+          bot.tools.push(TOOL_LABEL[tool.name](args)); updateLast(bot);
+          output = JSON.stringify(tool.run(args));
+        } catch (e) { output = JSON.stringify({ error: e.message }); }
+        openaiInput.push({ type: 'function_call_output', call_id: call.call_id, output });
+      }
+    }
+    bot.note = 'Stopped after 8 tool rounds. Ask a narrower follow-up question.';
   }
   function errorText(e) {
     const c = e && e.code;
@@ -388,7 +542,8 @@
     return out;
   }
 
-  window.Advisor = { toggle, ask, md, tools: TOOLS };
+  window.Advisor = TMP.advisor = { toggle, ask, md, tools: TOOLS, setAccessToken };
   shell();
-  document.addEventListener('tmp:render', () => { if (!aside.hidden) { paintSuggest(); paintStatus(); } });
+  bindAccessToken();
+  document.addEventListener('tmp:render', () => { bindAccessToken(); if (!aside.hidden) { paintSuggest(); paintStatus(); } });
 })();

@@ -209,7 +209,7 @@ const APPEARANCE_BACKGROUNDS = [{
 const APPEARANCE_FONTS = [{
   id: "system",
   label: "System Sans",
-  stack: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+  stack: "system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif"
 }, {
   id: "calibri",
   /* Uses the locally installed Calibri where present; falls back to the
@@ -258,10 +258,11 @@ const APPEARANCE_DEFAULTS = {
   numberWeight: "default", // default | medium | bold
   numberSize: "default",   // default | sm | lg
   numberFormat: {},        // patch over TP_NUMFMT_DEFAULTS (00-format.js)
-  size: "md",
-  borderTone: "light", // light | medium | strong
+  size: "lg",
+  headerCase: "title",
+  borderTone: "medium", // light | medium | strong
   borderWidth: "1", // 1 | 2
-  radius: "rounded", // rounded | soft | square
+  radius: "soft", // rounded | soft | square
   gridlines: false
 };
 
@@ -285,7 +286,8 @@ function appearanceStyle(eff) {
     style["--paper"] = bg.value;
   }
   const font = APPEARANCE_FONTS.find(f => f.id === eff.font);
-  if (font && font.id !== "system") style["--app-font"] = font.stack;
+  style["--app-font"] = (font || APPEARANCE_FONTS[0]).stack;
+  style["--app-font-num"] = style["--app-font"];
   if (eff.numberFont && eff.numberFont !== "same") {
     const nf = APPEARANCE_FONTS.find(f => f.id === eff.numberFont);
     if (nf) style["--app-font-num"] = nf.stack;

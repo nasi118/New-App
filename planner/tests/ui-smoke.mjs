@@ -49,7 +49,7 @@ await p.waitForTimeout(300);
 ok(/\/planner\//.test(p.url()), "the site root opens Tax Master");
 ok((await p.textContent(".brand")).includes("Tax Master"), "brand reads Tax Master");
 ok(await p.evaluate(() => window.TMP.state.view === "home"), "the landing page is the summary dashboard");
-ok(await p.locator(".cmd .kpi").count() >= 6 && await p.locator(".cmd svg.sankey").count() === 1, "dashboard shows KPIs and the money-flow chart");
+ok(await p.locator(".cmd .kpi").count() >= 6 && await p.locator(".cmd .income-composition").count() === 1, "dashboard shows KPIs and a reconciled income-composition chart");
 
 const navOrder = await p.$$eval("#nav .nav-group h4", (h) => h.map((x) => x.textContent));
 ok(JSON.stringify(navOrder) === JSON.stringify(["Overview", "Modules", "Wealth strategy", "Review & compliance", "Library"]), "side navigation groups in order: " + navOrder.join(", "));
@@ -74,17 +74,17 @@ await p.evaluate(() => { location.hash = "walk"; }); await p.waitForTimeout(80);
 const cols0 = await p.locator("table.walk th.colh").count();
 ok(cols0 === 3, "the Doe walk opens with the base and two planning columns (" + cols0 + ")");
 const tax0 = await p.evaluate(() => window.TMP.compute().tmw.cols[0].r.f.l24);
-const wages = 'input[data-bind="tm.clients.0.direct.wages"]';
+const wages = 'input[data-bind="tm.clients.0.adjustments.wages"]';
 await p.fill(wages, "1,958,000"); await p.press(wages, "Enter"); await p.waitForTimeout(80);
-ok(await p.evaluate((t) => window.TMP.compute().tmw.cols[0].r.f.l1a === 1958000 && window.TMP.compute().tmw.cols[0].r.f.l24 > t, tax0), "typing over line 1a recalculates the base column");
-ok(await p.evaluate(() => window.TMP.state.audit.some((a) => a.path === "tm.clients.0.direct.wages")), "the typed line is in the change log");
-ok(await p.locator(wages + ".ovr").count() === 1, "the typed cell is marked as typed over the module");
+ok(await p.evaluate((t) => window.TMP.compute().tmw.cols[0].r.f.l1a === 1958000 && window.TMP.compute().tmw.cols[0].r.f.l24 > t, tax0), "entering a source-preserving total on line 1a recalculates the base column");
+ok(await p.evaluate(() => window.TMP.state.audit.some((a) => a.path === "tm.clients.0.adjustments.wages")), "the typed line is in the change log");
+ok(await p.locator(wages + ".ovr").count() === 1, "the adjusted total is marked without replacing source records");
 await p.fill(wages, ""); await p.press(wages, "Enter"); await p.waitForTimeout(80);
 ok(await p.evaluate(() => window.TMP.compute().tmw.cols[0].r.f.l1a === 1758000), "clearing the cell returns to the module amount");
 
 await p.click('[data-action="add-col"][data-val="base"]'); await p.waitForTimeout(80);
 ok(await p.locator("table.walk th.colh").count() === 4, "adding a planning column adds a column that mirrors the 1040");
-const col3 = 'input[data-bind="tm.clients.0.cols.2.ov.charityCash"]';
+const col3 = 'input[data-bind="tm.clients.0.cols.2.adjustments.charityCash"]';
 await p.click('tr[data-toggle="w:l12"]'); await p.waitForTimeout(60);
 await p.fill(col3, "900000"); await p.press(col3, "Enter"); await p.waitForTimeout(80);
 ok(await p.evaluate(() => { const w = window.TMP.compute().tmw; return w.cols[3].r.f.l24 < w.cols[0].r.f.l24; }), "a typed amount in the new column changes only that column");
@@ -96,6 +96,43 @@ await p.click('[data-action="walk-col"][data-val="1"]'); await p.waitForTimeout(
 ok((await p.textContent(".walk-side")).includes("Planning: max retirement"), "selecting a column drives the live projection");
 await p.click('[data-action="calc"]'); await p.fill("#calcIn", "(145000+52000)*0.062"); await p.waitForTimeout(40);
 ok((await p.textContent("#calcOut")).includes("12,214"), "the calculator evaluates arithmetic");
+await p.press('#calcIn', 'Enter');
+await p.click('[data-action="calc-note"]');
+ok(await p.evaluate(() => TMP.TMV.active().notes._calculator.includes('12,214')), 'calculator tape saves to the active client notes');
+
+// Original per-line behavior: local explanation, inline elections and source drawer.
+await p.click('[data-action="walk-explain"][data-key="l2a"]');
+ok(await p.locator('#walkDetail').isVisible() && (await p.locator('#walkDetail').innerText()).includes('How the app got it') && (await p.locator('#walkDetail').innerText()).includes('IRC §103'), 'line explanations include source detail and authority without an API key');
+await p.click('[data-action="walk-panel-close"]');
+await p.click('[data-action="walk-col"][data-val="0"]');
+await p.click('tr[data-toggle="w:l10"]');
+await p.selectOption('[data-bind="tm.clients.0.elections.retirement.plan"]', 'solo401k');
+ok(await p.evaluate(() => TMP.compute().tmw.cols[0].r.s1.l16 > 0), 'inline retirement-plan election changes the computed deduction');
+const deferral = '[data-bind="tm.clients.0.elections.retirement.deferral"]';
+await p.fill(deferral, '0'); await p.press(deferral, 'Enter');
+ok(await p.evaluate(() => TMP.compute().tmw.cols[0].planning.retirement.employee === 0), 'an explicit zero deferral disables the employee contribution');
+await p.fill(deferral, ''); await p.press(deferral, 'Enter');
+ok(await p.evaluate(() => TMP.compute().tmw.cols[0].planning.retirement.employee > 0), 'clearing a deferral restores the eligible maximum');
+await p.selectOption('[data-bind="tm.clients.0.elections.hsa.mode"]', 'max');
+await p.selectOption('[data-bind="tm.clients.0.elections.hsa.coverage"]', 'family');
+ok(await p.evaluate(() => TMP.compute().tmw.cols[0].r.s1.l13 === 9750), 'HSA maximum uses family coverage and age-55 catch-up');
+await p.selectOption('[data-bind="tm.clients.0.elections.ira.mode"]', 'deductible');
+ok(await p.evaluate(() => TMP.compute().tmw.cols[0].planning.ira.contributionCeiling > 0), 'IRA contribution and deductibility are calculated inline');
+ok(await p.locator('[data-bind="tm.clients.0.elections.ira.covered"]').inputValue() === 'true' && await p.evaluate(() => TMP.compute().tmw.cols[0].planning.ira.covered === true), 'workplace-coverage control agrees with the selected retirement plan');
+const iraContribution = '[data-bind="tm.clients.0.elections.ira.amount"]';
+await p.fill(iraContribution, '0'); await p.press(iraContribution, 'Enter');
+ok(await p.evaluate(() => TMP.compute().tmw.cols[0].planning.ira.requested === 0), 'an explicit zero IRA contribution is preserved');
+await p.fill(iraContribution, ''); await p.press(iraContribution, 'Enter');
+ok(await p.evaluate(() => TMP.compute().tmw.cols[0].planning.ira.requested > 0), 'clearing an IRA contribution restores the eligible maximum');
+await p.click('[data-action="walk-detail"][data-key="l2a"]');
+ok(await p.locator('#walkDetail input[data-bind="tm.clients.0.mod.portfolio.interest.0.taxable"]').count() === 1, 'Details opens the editable source schedule inside a dialog');
+await p.keyboard.press('Escape');
+ok(await p.locator('#walkDetail').count() === 0, 'Escape closes the source drawer');
+const qbiOverride = '[data-bind="tm.clients.0.direct.qbiDed"]';
+await p.fill(qbiOverride, '10000'); await p.press(qbiOverride, 'Enter');
+ok(await p.evaluate(() => TMP.compute().tmw.cols[0].r.f.l13a === 10000), 'computed QBI supports an explicit manual deduction');
+await p.fill(qbiOverride, ''); await p.press(qbiOverride, 'Enter');
+ok(await p.evaluate(() => !TMP.compute().tmw.cols[0].r.q.typed), 'clearing the QBI override restores automatic calculation');
 
 // Module edit feeds the walk
 await p.evaluate(() => { location.hash = "m-itemized"; }); await p.waitForTimeout(60);
