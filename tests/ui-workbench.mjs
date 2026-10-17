@@ -31,7 +31,7 @@ const browser = await chromium.launch({
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on("pageerror", e => errors.push(String(e)));
-  await page.goto(BASE + "/");
+  await page.goto(BASE + "/workbench.html");
   await page.waitForSelector(".tp-root");
 
   ok(await page.locator(".tp-main-copyright").isVisible(), "desktop: copyright footer visible");
@@ -145,7 +145,7 @@ const browser = await chromium.launch({
 
   // URL param routing (duplicate view)
   const page2 = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page2.goto(BASE + "/?tab=audit");
+  await page2.goto(BASE + "/workbench.html?tab=audit");
   await page2.waitForSelector(".tp-root");
   ok(await page2.locator("h2:has-text('Audit Trail')").isVisible(), "?tab=audit opens Audit Trail view");
   await page2.close();
@@ -159,7 +159,7 @@ const browser = await chromium.launch({
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const errors = [];
   page.on("pageerror", e => errors.push(String(e)));
-  await page.goto(BASE + "/");
+  await page.goto(BASE + "/workbench.html");
   await page.waitForSelector(".tp-root");
 
   ok(await page.locator(".tp-main-copyright").isVisible(), "mobile: copyright footer visible without menus");

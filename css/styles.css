@@ -2163,7 +2163,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 
 
 
-/* ---- Tax Master Planner page (embeds planner/) ---- */
+/* ---- Tax Master page (embeds planner/) ---- */
 .tp-planner-head{display:flex;flex-wrap:wrap;gap:8px 12px;justify-content:space-between;align-items:center}
 .tp-planner-head p{margin:0;color:var(--muted);font-size:12.5px}
 .tp-planner-frame{position:relative;padding:0;overflow:hidden}

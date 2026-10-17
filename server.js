@@ -33,7 +33,7 @@ app.use(express.static(path.join(__dirname, ".")));
 
 // Fallback for root / SPA routing
 app.use((req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
+  res.sendFile(path.join(__dirname, "workbench.html"));
 });
 
 app.listen(PORT, "0.0.0.0", () => {

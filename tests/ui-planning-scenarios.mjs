@@ -21,7 +21,7 @@ let pass = 0, fail = 0;
 const ok = (c, n) => { c ? pass++ : fail++; console.log((c ? "  ✓ " : "  ✗ FAIL ") + n); };
 const p = await b.newPage({ viewport: { width: 1500, height: 950 } });
 const errs = []; p.on("pageerror", e => errs.push(String(e)));
-await p.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+await p.goto(BASE + "/workbench.html", { waitUntil: "domcontentloaded" });
 await p.waitForTimeout(1800);
 // pin the legacy seed like the acceptance suite does
 await p.evaluate(() => { const clients = loadClients(); clients[0].scenarios = seed(); saveClients(clients); });
