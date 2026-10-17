@@ -104,6 +104,8 @@ jobs:
             node tests/ui-strategy-library.mjs
           CHROMIUM_PATH="$(node -e 'console.log(require("playwright").chromium.executablePath())')" \
             node tests/ui-audit-estimated-tax.mjs
+          CHROMIUM_PATH="$(node -e 'console.log(require("playwright").chromium.executablePath())')" \
+            node tests/ui-planner-page.mjs
 
   excel-audit-smoke:
     name: Excel audit package generation + reconciliation
