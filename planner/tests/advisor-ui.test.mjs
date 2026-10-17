@@ -196,8 +196,45 @@ try {
   assert.deepEqual(errors, []);
   console.log('✓ Offline line context produces a refreshed local calculation explanation; free-form questions show connection guidance');
 
-  const privatePage = await browser.newPage();
   const appToken = 'test-only-private-app-access';
+  const focusPage = await browser.newPage();
+  await focusPage.addInitScript(() => {
+    // Hold the old opening delay until after Settings receives keyboard focus.
+    // This forces the user-navigation ordering instead of racing a wall clock.
+    const schedule = window.setTimeout.bind(window);
+    window.deferredOpeningTasks = [];
+    window.setTimeout = (callback, delay, ...args) => {
+      if (delay === 50 && typeof callback === 'function') { window.deferredOpeningTasks.push(() => callback(...args)); return 0; }
+      return schedule(callback, delay, ...args);
+    };
+  });
+  let focusPosts = 0;
+  await focusPage.route('**/api/ai/chat', async route => {
+    const authorized = route.request().headers().authorization === 'Bearer ' + appToken;
+    if (route.request().method() === 'GET') return route.fulfill({ json: { provider: 'openai', configured: authorized, accessRequired: !authorized, message: authorized ? '' : 'Enter the app access token.' } });
+    assert.equal(authorized, true);
+    assert.equal(route.request().postData().includes(appToken), false);
+    focusPosts++;
+    await route.fulfill({ json: { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Settings input retained its focus.' }] }], text: 'Settings input retained its focus.' } });
+  });
+  await focusPage.goto(base + '/planner/index.html', { waitUntil: 'domcontentloaded' });
+  await focusPage.waitForFunction(() => !!window.TMP?.advisor);
+  await focusPage.evaluate(() => Advisor.ask('Explain the return.'));
+  await focusPage.evaluate(() => TMP.go('settings'));
+  await focusPage.locator('#in-advisor-access').waitFor();
+  await focusPage.focus('#in-advisor-access');
+  await focusPage.evaluate(() => window.deferredOpeningTasks.splice(0).forEach(callback => callback()));
+  assert.equal(await focusPage.evaluate(() => document.activeElement.id), 'in-advisor-access', 'Opening the advisor cannot later steal focus from Settings');
+  await focusPage.keyboard.insertText(appToken);
+  assert.equal(await focusPage.inputValue('#in-advisor-access'), appToken);
+  assert.equal(await focusPage.inputValue('#advInput'), '', 'The app access token must never be typed into the advisor question');
+  await focusPage.dispatchEvent('#in-advisor-access', 'change');
+  await focusPage.evaluate(() => Advisor.ask('Use the private advisor.'));
+  assert.equal(focusPosts, 1, 'The token entered after navigation authorizes the next request');
+  await focusPage.close();
+  console.log('✓ Opening the advisor cannot redirect Settings token entry into the chat');
+
+  const privatePage = await browser.newPage();
   let privatePosts = 0;
   await privatePage.route('**/api/ai/chat', async route => {
     const authorized = route.request().headers().authorization === 'Bearer ' + appToken;

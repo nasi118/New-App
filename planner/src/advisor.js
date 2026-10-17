@@ -395,7 +395,18 @@
   function updateLast(t) { const log = document.getElementById('advLog'); const el = log && log.querySelector('[data-i="' + (turns.length - 1) + '"]'); if (el) { el.innerHTML = renderBot(t); log.scrollTop = log.scrollHeight; } }
   function setBusy(b) { busy = b; const btn = document.getElementById('advSend'); if (btn) { btn.textContent = b ? 'Stop' : 'Ask'; btn.classList.toggle('primary', !b); } }
 
-  function toggle() { const app = document.querySelector('.app'); const open = !app.classList.contains('advisor-open'); app.classList.toggle('advisor-open', open); aside.hidden = !open; if (open) { paintStatus(); paintSuggest(); setTimeout(() => { const i = document.getElementById('advInput'); i && i.focus(); }, 50); } }
+  function toggle() {
+    const app = document.querySelector('.app');
+    const open = !app.classList.contains('advisor-open');
+    app.classList.toggle('advisor-open', open); aside.hidden = !open;
+    if (open) {
+      paintStatus(); paintSuggest();
+      // Focus while opening, before the user can navigate or choose another
+      // field. A deferred focus can redirect a Settings token into the chat.
+      const input = document.getElementById('advInput');
+      if (input) input.focus({ preventScroll: true });
+    }
+  }
   function ask(q, context) { const app = document.querySelector('.app'); if (!app.classList.contains('advisor-open')) toggle(); return send(q, context === undefined ? null : context); }
 
   function localExplanation(context) {
