@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------------
-   Tax Master Planner page — embeds the planning-and-compliance app that lives
+   Tax Master page — embeds the Tax Master 1040 planning app that lives
    in planner/ (also published as a claude.ai Artifact) so it opens from the
    Workbench navigation. The planner keeps its own data and engine; nothing
    here reads or writes Workbench client data.
@@ -35,12 +35,12 @@ function PlannerPage() {
   }, !loaded && EL("p", {
     className: "tp-planner-loading"
   }, "Loading the planner…"), EL("iframe", {
-    title: "Tax Master Planner",
+    title: "Tax Master",
     src: url,
     onLoad: () => setLoaded(true)
   })) : EL("div", {
     className: "tp-card"
   }, EL("p", null, "This single-file copy of the Workbench does not include the planner. ",
-    EL("a", { href: TP_PLANNER_HOSTED, target: "_blank", rel: "noopener" }, "Open the Tax Master Planner"),
+    EL("a", { href: TP_PLANNER_HOSTED, target: "_blank", rel: "noopener" }, "Open Tax Master"),
     " in a new tab, or build its own single file with ", EL("code", null, "node planner/build.mjs"), ".")));
 }

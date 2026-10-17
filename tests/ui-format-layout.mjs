@@ -22,7 +22,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 const errors = [];
 page.on("pageerror", e => errors.push(String(e)));
-await page.goto(BASE, { waitUntil: "networkidle" });
+await page.goto(BASE + "/workbench.html", { waitUntil: "networkidle" });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForTimeout(700);

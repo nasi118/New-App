@@ -1,4 +1,4 @@
-/* Tax Master Planner — AI tax advisor.
+/* Tax Master — AI tax advisor.
  * Two connections:
  *   claude.ai: the artifact runtime's `sample` capability (viewer's own Claude account, page tools)
  *   API key:   Anthropic Messages API from the browser, streamed, with the same page tools
@@ -10,9 +10,10 @@
   const clone = (o) => JSON.parse(JSON.stringify(o));
 
   const RULES = [
-    'You are the tax advisor built into Tax Master Planner, a working tool for a U.S. tax professional.',
-    'The app has two workspaces over the same client data. Planning: Rivera tax scenarios and 2026 safe-harbor estimates, the Doe rental election and ownership analysis, and John Doe\'s wealth strategy package. Compliance: the Rivera 2025 Form 1040 tie-out and review, the Doe rental return positions and election statements, review findings, and a filing calendar that also picks up filings created by selected planning strategies.',
-    'The client models were rebuilt from spreadsheets: (1) a Form 1040 reconciliation workpaper for Jordan and Casey Rivera, MFJ, tax year 2025 (fictional training data); (2) a rental holding company analysis for John and Jane Doe (JD Rental Holdings LLC, four disregarded property LLCs, TY2026) covering the §469(c)(7)(A) real estate professional election and §199A aggregation; (3) a 50-strategy high-net-worth planning comparison for John Doe (2026).',
+    'You are the tax advisor built into Tax Master, an individual Form 1040 planning tool (TY2025 and TY2026) for a U.S. tax professional.',
+    'Tax Master is organized by client. Each client has Client info (filing status, year, dependents, W-2s, other income), modules (Portfolio income, Schedule C, Capital transactions with investment assets, business assets and equity compensation, Rents & royalty, Passthrough K-1s, QBI, Itemized deductions) that feed leaf inputs of a Form 1040 walk, and up to five planning columns beside the base return. A planning column has its own year, filing status, planning moves (levers) and typed line overrides. The engine computes every column: tax with the Schedule D worksheet, AMT (Form 6251), SE tax, Additional Medicare Tax, NIIT, QBI with W-2/UBIA limits, the SALT cap phase-down, Schedule 1-A and the 2026 itemized limits.',
+    'Demo clients are fictional: the Doe household (TY2026, high-net-worth investor with executive equity, a rental HoldCo, private-fund K-1s and asset sales) and the Rivera household (TY2025, mapped from a Form 1040 reconciliation workpaper).',
+    'Three more models come from workbooks: (1) the Rivera Form 1040 reconciliation workpaper (Review & compliance views); (2) the Doe rental holding company analysis (JD Rental Holdings LLC, TY2026) covering the §469(c)(7)(A) election and §199A aggregation; (3) a 50-strategy high-net-worth planning comparison for John Doe (Wealth strategy views).',
     'Each model runs in "workbook" mode (formulas exactly as built) or "corrected" mode (review fixes applied). Findings list the formula and technical issues with dollar impacts.',
     '',
     'How to answer:',
@@ -38,32 +39,55 @@
       w1040: { agi: r0(w.f.l11b), deduction: r0(w.f.l12e), qbiDeduction: r0(w.f.l13a), taxableIncome: r0(w.f.l15), tax: r0(w.f.l16), engineTax: r0(w.tax.engine), seTax: w.se.j, totalTax: r0(w.f.l24), payments: r0(w.f.l33), refundOrOwed: r0(w.net) },
       rental: { netRentalQbi: rr.tot.qbi, deduction199A: r0(rr.summary.ded), qbiCarryforward: rr.summary.carry, repTestsPass: rr.rep.pass, aggregationPass: rr.agg.pass, electionValue: r0(rr.election.value) },
       hnwi: { totalBenefitAll: r0(hn.dashboard.total), selectedCount: hn.selected.count, selectedNet: r0(hn.selected.net) },
+      tm: tmMetrics(data),
       _hn: hn,
     };
   }
+  function activeIndex(data) { const t = data.tm; const i = t.clients.findIndex((c) => c.id === t.active); return i < 0 ? 0 : i; }
+  function tmMetrics(data) {
+    const w = window.TM.walkClient(data.tm.clients[activeIndex(data)]);
+    const out = {};
+    w.cols.forEach((x, j) => { const r = x.r; out[j === 0 ? 'base' : 'col' + j] = { name: x.col.name, agi: r0(r.agi), taxableIncome: r0(r.f.l15), tax: r0(r.f.l16), amt: r0(r.amt.amt), niit: r0(r.s2.l12), seTax: r0(r.se.tax), qbiDeduction: r0(r.f.l13a), totalTax: r0(r.f.l24), refundOrOwed: r0(r.net) }; });
+    return out;
+  }
   function parseValue(v) { if (typeof v === 'number' || typeof v === 'boolean') return v; const s = String(v).trim(); if (/^(true|false)$/i.test(s)) return /^true$/i.test(s); const x = s.replace(/[$,]/g, ''); return x !== '' && isFinite(+x) ? +x : s; }
   function checkPath(path) {
-    if (typeof path !== 'string' || !/^(w1040|rental|hnwi|calendar)\.[\w.-]+$/.test(path)) throw new Error('Path must start with w1040., rental., hnwi. or calendar. and use dot notation, for example w1040.other.cashCharity');
+    if (typeof path !== 'string' || !/^(w1040|rental|hnwi|calendar|tm)\.[\w.-]+$/.test(path)) throw new Error('Path must start with tm., w1040., rental., hnwi. or calendar. and use dot notation, for example tm.clients.0.cols.0.lv.charity or w1040.other.cashCharity');
     const cur = TMP.getPath(TMP.state.data, path);
     if (cur === undefined && /^calendar\./.test(path)) return 'Not started';
     if (cur === undefined && /^w1040\.planning\.scenarios\.\d+\.levers\.\w+$/.test(path)) return 0;
+    if (cur === undefined && /^tm\.clients\.\d+\.(direct|cols\.\d+\.(ov|lv)|scen\.scenarios\.\d+\.levers|other)\.\w+$/.test(path)) return null;
     if (cur === undefined) throw new Error('No input at ' + path + '. Read the schedule or strategy first to find input paths.');
     if (cur !== null && typeof cur === 'object') throw new Error(path + ' is a group, not a single input.');
     return cur;
   }
   function diff(a, b) {
     const out = {};
-    ['w1040', 'rental', 'hnwi'].forEach((m) => { Object.keys(a[m]).forEach((k) => { if (JSON.stringify(a[m][k]) !== JSON.stringify(b[m][k])) out[m + '.' + k] = { before: a[m][k], after: b[m][k] }; }); });
+    ['w1040', 'rental', 'hnwi', 'tm'].forEach((m) => { Object.keys(a[m]).forEach((k) => { if (JSON.stringify(a[m][k]) !== JSON.stringify(b[m][k])) out[m + '.' + k] = { before: a[m][k], after: b[m][k] }; }); });
     return out;
   }
   const TOOLS = [
     {
-      name: 'get_tax_scenarios',
-      description: 'Read the Rivera planning scenarios (2025 what-if or 2026 projection) with each scenario\'s levers and results, plus the 2026 safe-harbor estimated tax. Lever inputs are at w1040.planning.scenarios.<i>.levers.<sepIra|hsa|charity|harvest|roth|schCExpense|extraEst>; year at w1040.planning.year; growth at w1040.planning.growth.',
-      run() {
-        const r = TMP.compute(); const pl = TMP.state.data.w1040.planning;
-        return { year: pl.year, growth: pl.growth, scenarios: r.scen.map((x, i) => ({ index: i, name: x.name, levers: pl.scenarios[i].levers, agi: r0(x.v.f.l11b), taxableIncome: r0(x.v.f.l15), incomeTax: r0(x.v.f.l16), seTax: x.v.se.j, niit: r0(x.v.s2.l12), totalTax: r0(x.v.f.l24), marginalRate: r0(x.marginal), cashOutlay: x.cash, refundOrOwed: r0(x.v.net), sepIraMax: Math.round(x.sepMax) })), safeHarbor: r.safeHarbor };
+      name: 'get_client_return',
+      description: 'Read the active Tax Master client\'s Form 1040 walk: client facts, every column (base and planning) with its year, filing status, planning moves and typed overrides, each 1040 line with its value per column, diagnostics and module checks. Editable paths (prefix "tm.clients.<clientIndex>."): base typed line = direct.<leaf>; planning column j (0-based, excluding base) typed line = cols.<j>.ov.<leaf>, planning move = cols.<j>.lv.<sepIra|hsa|charity|harvest|roth|schCExpense|deferIncome|extraEst>, growth = cols.<j>.growth, year = cols.<j>.year, status = cols.<j>.status. Module inputs live under mod.* (for example mod.itemized.charityCash, mod.schC.businesses.0.gross).',
+      inputSchema: { type: 'object', properties: { lines: { type: 'string', enum: ['summary', 'all'], description: 'summary = key lines only (default); all = every line incl. sub-lines' } } },
+      run(input) {
+        const TMV = TMP.TMV; const c = TMV.active(); const ci = activeIndex(TMP.state.data); const w = TMP.compute().tmw;
+        const flat = []; const walkRows = (rows, depth) => rows.forEach((row) => { if (row.s) return; if (depth === 0 || (input && input.lines === 'all')) flat.push(row); if (row.sub) walkRows(row.sub, depth + 1); });
+        walkRows(TMV.walkRows, 0);
+        const det = w.feeds.detail;
+        return {
+          clientIndex: ci, client: { name: TMV.clientLabel(c), year: c.info.year, status: c.info.status, state: c.info.state, dependents: c.deps, priorYearTax: c.info.priorTax, priorYearAgi: c.info.priorAgi },
+          columns: w.cols.map((x, j) => ({ index: j === 0 ? 'base' : j - 1, name: x.col.name, year: x.col.year, status: x.col.status, growth: x.col.growth || 0, moves: x.col.lv || {}, typed: j === 0 ? c.direct : x.col.ov, totalTax: r0(x.r.f.l24), effectiveRate: r0(x.r.effective), marginalRate: r0(x.r.marginal), refundOrOwed: r0(x.r.net), amt: { amti: r0(x.r.amt.amti), exemption: r0(x.r.amt.exemption), tmt: r0(x.r.amt.tmt), amt: r0(x.r.amt.amt) } })),
+          lines: flat.map((row) => ({ line: row.ln, desc: typeof row.d === 'function' ? row.d(w.cols[0].r) : row.d, authority: row.a || undefined, leaf: row.leaf || undefined, values: w.cols.map((x) => r0(TMV.rowVal(row, x.r))) })),
+          diagnostics: w.cols[0].r.diag, moduleChecks: [].concat(det.pf.checks, det.sc.checks, det.cap.checks, det.eq.checks, det.k1.checks, det.rents.checks),
+        };
       },
+    },
+    {
+      name: 'get_tax_scenarios',
+      description: 'Read the active client\'s Tax scenarios & estimates page: scenario names and planning moves (paths tm.clients.<i>.scen.scenarios.<j>.levers.<key>), whether it projects the next year (scen.project, scen.growth). Use get_client_return for results by column; use what_if with planning-move paths to compare.',
+      run() { const c = TMP.TMV.active(); return { clientIndex: activeIndex(TMP.state.data), project: !!c.scen.project, growth: c.scen.growth, scenarios: c.scen.scenarios, levers: window.TM.LEVERS.map((l) => ({ key: l.key, label: l.label, hint: l.hint })) }; },
     },
     {
       name: 'get_filing_calendar',
@@ -109,7 +133,7 @@
     },
     {
       name: 'what_if',
-      description: 'Test changes without saving them. Give one or more {path, value} pairs (paths as returned by the other tools, e.g. w1040.other.cashCharity, rental.taxableIncome, hnwi.strategies.8.I). Returns key results before and after.',
+      description: 'Test changes without saving them. Give one or more {path, value} pairs (paths as returned by the other tools, e.g. tm.clients.0.cols.0.lv.charity, tm.clients.0.direct.wages, w1040.other.cashCharity, rental.taxableIncome, hnwi.strategies.8.I). Returns key results before and after, including every Tax Master column.',
       inputSchema: { type: 'object', properties: { changes: { type: 'array', items: { type: 'object', properties: { path: { type: 'string' }, value: {} }, required: ['path', 'value'] } } }, required: ['changes'] },
       run(input) {
         const changes = Array.isArray(input.changes) ? input.changes : [];
@@ -139,13 +163,13 @@
     },
     {
       name: 'open_view',
-      description: 'Show a view to the user. Planning views: p-home, p-rivera, r-props, r-469, h-dash, h-matrix, h-cost, h-check. Compliance views: c-home, calendar, findings, w-tie, w-sources, w-sched, w-review, r-199a, r-statements. Library: sources, audit, settings. For w-sched pass tab (schA, schB, schC, schD, schE, f8582, schSE, f8995, s8812, sch1, sch2, sch3, taxCalc).',
+      description: 'Show a view to the user. Overview: home (summary dashboard), client, walk (Form 1040 walk). Modules: m-portfolio, m-schc, m-capital, m-rents, m-k1, scen (tax scenarios & estimates), m-qbi, r-469 (rental election & ownership), m-itemized. Wealth strategy: h-dash, h-matrix, h-cost, h-check. Review & compliance: c-home, w-tie, findings, calendar, w-sources, w-sched, w-review, r-props, r-199a, r-statements. Library: sources, audit, settings. For w-sched pass tab (schA, schB, schC, schD, schE, f8582, schSE, f8995, s8812, sch1, sch2, sch3, taxCalc).',
       inputSchema: { type: 'object', properties: { view: { type: 'string' }, tab: { type: 'string' } }, required: ['view'] },
       run(input) { const v = String(input.view); if (!TMP.VIEWS[v]) throw new Error('Unknown view ' + v); if (input.tab) TMP.state.tab.sched = String(input.tab); TMP.go(v); return { opened: v }; },
     },
   ];
   const SCHED_NAME = { f1040: 'Form 1040', control: 'the control panel', schA: 'Schedule A', schB: 'Schedule B', schC: 'Schedule C', schD: 'Schedule D', schE: 'Schedule E', f8582: 'Form 8582', schSE: 'Schedule SE', f8995: 'Form 8995', s8812: 'Schedule 8812', sch1: 'Schedule 1', sch2: 'Schedule 2', sch3: 'Schedule 3', taxCalc: 'the tax calculation' };
-  const TOOL_LABEL = { get_1040_schedule: (i) => 'Reading ' + (SCHED_NAME[i.schedule] || 'a schedule'), get_rental_analysis: () => 'Reading the rental analysis', get_strategy: (i) => (i.no ? 'Reading strategy #' + i.no : 'Listing strategies'), list_findings: () => 'Reading findings', what_if: () => 'Running a what-if', set_input: (i) => 'Changing ' + i.path, open_view: (i) => 'Opening ' + i.view, get_tax_scenarios: () => 'Reading the tax scenarios', get_filing_calendar: () => 'Reading the filing calendar' };
+  const TOOL_LABEL = { get_1040_schedule: (i) => 'Reading ' + (SCHED_NAME[i.schedule] || 'a schedule'), get_rental_analysis: () => 'Reading the rental analysis', get_strategy: (i) => (i.no ? 'Reading strategy #' + i.no : 'Listing strategies'), list_findings: () => 'Reading findings', what_if: () => 'Running a what-if', set_input: (i) => 'Changing ' + i.path, open_view: (i) => 'Opening ' + i.view, get_tax_scenarios: () => 'Reading the tax scenarios', get_client_return: () => 'Reading the 1040 walk', get_filing_calendar: () => 'Reading the filing calendar' };
 
   /* ---------------- UI ---------------- */
   const turns = []; // {role, text}
@@ -164,6 +188,7 @@
     return sm ? 'claude' : (s.apiKey ? 'api' : null);
   }
   const SUGGEST = {
+    t: ['Which planning column should we recommend, and why?', 'Why does AMT apply in the base column, and how could we reduce it?', 'What would harvesting another $100,000 of losses save?'],
     p: ['Which Rivera scenario should we act on, and by when?', 'How much should the Riveras pay for the January estimate?', 'Which Doe strategies give the best net benefit at low or medium risk?'],
     c: ['What is due in the next 30 days, and what blocks it?', 'Summarize the high-severity findings', 'What should I fix first in the Rivera workpaper?'],
     w: ['Why does the corrected return owe more than the workbook?', 'Walk me through the SE tax wage-base fix', 'What should line 16 be after the corrections?'],
@@ -183,7 +208,7 @@
   }
   function paintSuggest() {
     const el = document.getElementById('advSuggest'); if (!el) return;
-    const v = TMP.state.view; const key = v === 'p-home' || v === 'p-rivera' ? 'p' : v === 'c-home' || v === 'calendar' || v === 'findings' ? 'c' : v[0] === 'w' || v[0] === 'r' || v[0] === 'h' ? v[0] : 'x';
+    const v = TMP.state.view; const key = ['home', 'client', 'walk', 'scen'].includes(v) || v.startsWith('m-') ? 't' : v === 'p-home' || v === 'p-rivera' ? 'p' : v === 'c-home' || v === 'calendar' || v === 'findings' ? 'c' : v[0] === 'w' || v[0] === 'r' || v[0] === 'h' ? v[0] : 'x';
     const list = SUGGEST[key];
     el.innerHTML = turns.length ? '' : list.map((q) => '<button type="button">' + esc(q) + '</button>').join('');
     el.querySelectorAll('button').forEach((b) => { b.onclick = () => send(b.textContent); });
@@ -196,7 +221,7 @@
   function paintLog() {
     const log = document.getElementById('advLog'); if (!log) return;
     log.innerHTML = turns.length ? turns.map((t, i) => '<div class="msg ' + (t.role === 'user' ? 'user' : 'bot') + '" data-i="' + i + '">' + (t.role === 'user' ? esc(t.text) : renderBot(t)) + '</div>').join('') :
-      '<div class="msg bot"><p>Ask about any figure, rule or strategy in the three client files. I can read every schedule, test a change with a what-if, and change an input when you ask me to.</p></div>';
+      '<div class="msg bot"><p>Ask about any line, column, rule or strategy. I can read the 1040 walk and every module, test a change with a what-if, and change an input when you ask me to.</p></div>';
     log.scrollTop = log.scrollHeight;
     paintSuggest();
   }

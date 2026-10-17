@@ -1,6 +1,6 @@
 # AI-Tax
 
-**[Open the live Tax Planning Workbench](https://nasi118.github.io/AI-Tax/)**
+**[Open Tax Master](https://nasi118.github.io/AI-Tax/)** · [Classic Tax Planning Workbench](https://nasi118.github.io/AI-Tax/workbench.html)
 
 [Architecture](docs/ARCHITECTURE.md) · [Capabilities](docs/CAPABILITIES.md) · [Controls](docs/CONTROLS.md) · [Runbook](docs/RUNBOOK.md) · [Known limitations](docs/UNSUPPORTED.md)
 
@@ -8,12 +8,15 @@
 
 This is the **canonical repository and main application**. The separate `AI-Tax-APP` repository is retained as a legacy/reference implementation while selected capabilities are consolidated here; see [Consolidation](docs/CONSOLIDATION.md).
 
-Two complementary components live in this repository:
+Three components live in this repository:
 
-1. **Tax Planning Workbench** (formerly Tax Advisory Pro) — a dependency-free static web app (React 18, no
-   build step) for TY2025/TY2026 individual tax planning. Served from the
-   repo root; this is what GitHub Pages and connected static deployments serve.
-2. **`ai_tax` (Python)** — an audit-grade deterministic tax calculation
+1. **Tax Master** (`planner/`, opened from the site root) — the main app: individual
+   Form 1040 planning for TY2025/TY2026 with a summary dashboard, client info, a Form 1040
+   walk with up to five planning columns, income and deduction modules, wealth strategy,
+   and review and compliance workpapers. See [Tax Master](#tax-master--individual-1040-planning-planner).
+2. **Tax Planning Workbench** (formerly Tax Advisory Pro) — the classic dependency-free static
+   web app (React 18, no build step), now served at `workbench.html`.
+3. **`ai_tax` (Python)** — an audit-grade deterministic tax calculation
    engine with versioned rulesets, immutable base-case/scenario lifecycle,
    reconciliation, permanent Excel audit packages, and a constrained
    **Tax Planning Analyst Agent** as an orchestration/explanation layer.
@@ -82,7 +85,8 @@ npm run build:standalone       # writes dist/tax-advisory-pro.html
 ### Project layout
 
 ```
-index.html          App shell — loads styles and scripts in order
+index.html          Forwards the site root to Tax Master (planner/)
+workbench.html      Workbench app shell — loads styles and scripts in order
 css/styles.css      Application styles
 vendor/             React 18.3.1 UMD builds + polyfills (no CDN needed)
 src/                Application code (plain JS, React.createElement — no JSX build)
@@ -105,26 +109,30 @@ tools/              Build script for the standalone single-file version
 ```
 
 The `src/` files were authored as one script and share the global scope —
-`index.html` loads them in their original order, which must be preserved.
+`workbench.html` loads them in their original order, which must be preserved.
 
 > **Note:** This tool is a planning aid. It is not tax advice; verify results
 > against current IRS guidance before relying on them.
 
 ---
 
-## Tax Master Planner — planning and compliance workspaces (`planner/`)
+## Tax Master — individual 1040 planning (`planner/`)
 
-A separate static app at [`/planner/`](https://nasi118.github.io/AI-Tax/planner/) that runs
-planning and compliance side by side over the same client data: tax scenarios and
-safe-harbor estimates, a rental §469/§199A analysis, a 50-strategy wealth plan, a
-Form 1040 tie-out with formula review findings, a filing calendar fed by planning
-decisions, and an AI tax advisor. Built from three demo client workbooks; see
-[planner/README.md](planner/README.md). It also opens inside the Workbench from the
-**Tax Master Planner** item in the Planning navigation (`src/30-planner-page.js`).
+The main app, opened from the site root ([live](https://nasi118.github.io/AI-Tax/)). Each client has:
+
+- **Summary dashboard** (landing page) — KPIs, money flow from income to tax, planning columns, estimated payments, module status and diagnostics.
+- **Client info** — filing facts, dependents, W-2s and the income, credits and payments that are not built from a module.
+- **Form 1040 walk** — every 1040 line with its IRC authority and status (OK / EST / INC / ERR), expandable schedules, a live projection, diagnostics and an AMT estimate. Add up to **five planning columns** beside the base; each mirrors Form 1040 and has its own year, filing status, planning moves and typed lines.
+- **Modules** — Portfolio income, Schedule C, Capital transactions (investment assets, business assets, equity compensation), Rents & royalty, Passthrough K-1s, Tax scenarios & estimates, QBI workbench, Rental election & ownership, Itemized deductions. Module amounts feed the walk; any line can also be typed directly in the walk.
+- **Wealth strategy**, **Review & compliance** and **Library** views carried over from the workbook models.
+
+The 1040 engine (`planner/src/tm-engine.js`, `tm-modules.js`) handles all filing statuses for TY2025 and TY2026, including the Schedule D worksheet, AMT, SE tax, NIIT, Additional Medicare Tax, QBI limits and the Pub. L. 119-21 changes. See [planner/README.md](planner/README.md).
+It also opens inside the Workbench from the **Tax Master** item (`src/30-planner-page.js`).
 
 ```sh
-node --test planner/tests/engine.test.js
-node planner/build.mjs               # dist/tax-master-planner.html
+node --test planner/tests/engine.test.js planner/tests/tm-engine.test.js
+node planner/tests/ui-smoke.mjs      # with python3 -m http.server 8321 running
+node planner/build.mjs               # dist/tax-master.html
 ```
 
 ---

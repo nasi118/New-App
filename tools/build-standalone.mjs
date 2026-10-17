@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-let html = readFileSync(join(root, "index.html"), "utf8");
+let html = readFileSync(join(root, "workbench.html"), "utf8");
 
 html = html.replace(
   /<link rel="stylesheet" href="([^"]+)">/g,

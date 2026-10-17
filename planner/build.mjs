@@ -1,7 +1,7 @@
 // Inline planner/index.html and its local CSS/JS into one self-contained file.
 //
-//   node planner/build.mjs              -> dist/tax-master-planner.html
-//   node planner/build.mjs --artifact   -> also dist/tax-master-planner.artifact.html
+//   node planner/build.mjs              -> dist/tax-master.html
+//   node planner/build.mjs --artifact   -> also dist/tax-master.artifact.html
 //                                          (body fragment for claude.ai Artifact publishing)
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -17,7 +17,7 @@ html = html.replace(/<script src="(src\/[^"]+)"><\/script>/g, (_, src) => "<scri
 if (/(href|src)="src\//.test(html)) throw new Error("A local asset was not inlined");
 
 mkdirSync(join(root, "dist"), { recursive: true });
-const out = join(root, "dist", "tax-master-planner.html");
+const out = join(root, "dist", "tax-master.html");
 writeFileSync(out, html);
 console.log("wrote", out, Math.round(Buffer.byteLength(html) / 1024), "KB");
 
@@ -26,7 +26,7 @@ if (process.argv.includes("--artifact")) {
   const head = html.slice(html.indexOf("<head>") + 6, html.indexOf("</head>"));
   const body = html.slice(html.indexOf("<body>") + 6, html.indexOf("</body>"));
   const keep = head.split("\n").filter((l) => /<title>|fonts\.g|<style>|<\/style>/.test(l) || !/^<(meta|link)/.test(l)).join("\n");
-  const frag = join(root, "dist", "tax-master-planner.artifact.html");
+  const frag = join(root, "dist", "tax-master.artifact.html");
   writeFileSync(frag, keep + "\n" + body);
   console.log("wrote", frag);
 }

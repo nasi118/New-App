@@ -539,9 +539,9 @@ const TABS = [{
   blurb: "Interactive slide presentation, real-time strategy simulation, and guided platform tour."
 }, {
   id: "planner",
-  label: "Tax Master Planner",
+  label: "Tax Master",
   icon: I.calc,
-  blurb: "Planning and compliance workspaces: tax scenarios and estimates, rental election, wealth strategies, Form 1040 tie-out and filing calendar."
+  blurb: "Individual 1040 planning: summary dashboard, Form 1040 walk with planning columns, income and deduction modules, wealth strategy and compliance review."
 }, {
   id: "drive",
   label: "Google Drive",
