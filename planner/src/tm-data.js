@@ -15,6 +15,17 @@
     next.settings = Object.assign({}, next.settings || {}, { apiKey: oldSettings.apiKey || '', rememberKey: !!oldSettings.rememberKey });
     if (mode === 'replace') next.audit = next.audit.map((entry) => Object.assign(entry, { noUndo: true, imported: true }));
     if (mode !== 'replace') {
+      const touched = new Set(incoming.data.tm.clients.map((client) => client.id));
+      // A complete client replacement starts a new source timeline. Earlier row
+      // indexes may identify different documents after an import; never replay
+      // old Undo actions against those replacement records.
+      next.audit.forEach((entry) => {
+        const path = String(entry.path || ''), match = /^tm\.clients\.(\d+)(\.|$)/.exec(path);
+        const indexed = match && current.data.tm.clients[+match[1]];
+        const clientId = entry.clientId || indexed && indexed.id;
+        const ambiguous = /^tm(?:\.clients)?$/.test(path) || match && (!indexed || entry.clientId && entry.clientId !== indexed.id) || entry.unresolvedClient || path.startsWith('archive:tm.');
+        if (touched.has(clientId) || ambiguous) Object.assign(entry, { noUndo: true, importCheckpoint: true });
+      });
       const destination = next.data.tm.clients;
       const indexMap = new Map();
       incoming.data.tm.clients.forEach((client, sourceIndex) => {

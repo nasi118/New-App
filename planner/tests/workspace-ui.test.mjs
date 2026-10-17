@@ -174,6 +174,8 @@ try {
   await page.locator('[data-action="data-apply"]').click();
   await page.waitForFunction(() => TMP.TMV.active().w2[0].wages === 130000);
   ok((await result()).agi === 132000, 'applying the reviewed Excel import recalculates the return from the edited cell');
+  ok(await page.evaluate(() => TMP.state.audit.filter(a => a.clientId === TMP.state.data.tm.active).every(a => a.noUndo)),
+    'replacing a client checkpoints old Undo actions before imported source rows can change identity');
   assert.deepEqual(await page.evaluate(() => TMP.state.data.tm.clients.filter(c => c.id !== TMP.state.data.tm.active)), otherClients);
   ok(true, 'client merge preserves all other client records');
   await page.reload({ waitUntil: 'domcontentloaded' });

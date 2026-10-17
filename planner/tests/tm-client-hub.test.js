@@ -180,4 +180,10 @@ test('audit view escapes stored text, displays complete object changes and never
   assert.ok(html.includes('&lt;script&gt;client&lt;/script&gt;')); assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
   assert.ok(html.includes('x'.repeat(200))); assert.ok(html.includes('AI advisor')); assert.ok(html.includes('not independent audit verification'));
   assert.ok(!html.includes('<script>')); assert.ok(!html.includes('data-action="hub-undo"'));
+  assert.match(html, />Recorded<\/span>/);
+  state.audit.push({ ts: '2026-10-02', clientId: state.data.tm.active, path: 'tm.clients.0.w2.0.wages', from: 100, to: 150, noUndo: true, importCheckpoint: true });
+  const checkpointHTML = hub.VIEWS.audit();
+  assert.match(checkpointHTML, />Before import<\/span>/);
+  assert.match(checkpointHTML, /An import replaced this client record/);
+  assert.ok(!checkpointHTML.includes('data-action="hub-undo"'));
 });

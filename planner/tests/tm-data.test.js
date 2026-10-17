@@ -45,7 +45,25 @@ test('reimporting current history does not duplicate events and imported records
   const incoming = clone(current); incoming.audit.push({ ts: '2026-10-18', by: 'you', path: 'tm.clients.0.info.name', from: 'New', to: 'Latest' });
   const first = DataUI.mergeState(current, incoming, 'merge'), second = DataUI.mergeState(first, incoming, 'merge');
   assert.equal(first.audit.length, 2); assert.equal(second.audit.length, 2);
-  assert.equal(first.audit[0].noUndo, undefined); assert.equal(first.audit[1].noUndo, true);
+  assert.equal(first.audit[0].noUndo, true); assert.equal(first.audit[0].importCheckpoint, true); assert.equal(first.audit[1].noUndo, true);
+});
+test('complete client import checkpoints earlier undo paths before source rows can be reordered', () => {
+  const current = fixture(), a = current.data.tm.clients[0], b = current.data.tm.clients[1];
+  a.w2 = [{ employer: 'Acme', wages: 150 }, { employer: 'Beta', wages: 200 }];
+  current.audit = [
+    { path: 'tm.clients.0.w2.0.wages', clientId: a.id, from: 100, to: 150 },
+    { path: 'tm.clients.0.info.name', from: 'Before', to: 'After' },
+    { path: 'tm.clients.1.w2.0.wages', clientId: b.id, from: 10, to: 20 },
+    { path: 'tm.clients', from: [], to: [] },
+    { path: 'settings.firm', from: 'Old firm', to: 'New firm' },
+  ];
+  const incoming = clone(current); incoming.data.tm.clients = [incoming.data.tm.clients[0]];
+  incoming.data.tm.clients[0].w2.reverse(); incoming.audit = [];
+  const next = DataUI.mergeState(current, incoming, 'merge');
+  assert.equal(next.data.tm.clients[0].w2[0].employer, 'Beta');
+  for (const index of [0, 1, 3]) assert.ok(next.audit[index].noUndo && next.audit[index].importCheckpoint);
+  for (const index of [2, 4]) assert.equal(next.audit[index].noUndo, undefined);
+  assert.equal(current.audit[0].noUndo, undefined, 'Preview must not change current history');
 });
 test('workspace restore keeps the current private key, not an imported credential', () => {
   const current = fixture(), incoming = fixture(); incoming.settings.apiKey = 'untrusted-imported-key'; incoming.audit = [{ path: 'tm.clients.0.info.name', from: 'Previous', to: 'Restored' }];

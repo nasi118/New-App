@@ -58,6 +58,9 @@ application history, not independent audit verification.
 History is preserved across reloads without a fixed entry cap. If browser storage
 is unavailable or full, the app shows a backup prompt and rejects imports that
 cannot be saved, preserving the existing workspace.
+An import checkpoints earlier history for replaced clients as read-only, so an old
+Undo action cannot overwrite a different source after rows are reordered. New
+edits remain undoable; history for clients outside the import is unchanged.
 
 ### Excel, backups and Google Sheets
 
