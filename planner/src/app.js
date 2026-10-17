@@ -58,8 +58,13 @@
     try {
       const settings = Object.assign({}, state.settings);
       if (!settings.rememberKey) settings.apiKey = '';
-      localStorage.setItem(STORE, JSON.stringify({ data: state.data, settings, audit: state.audit.slice(-500) }));
-    } catch (e) { /* ignore */ }
+      localStorage.setItem(STORE, JSON.stringify({ data: state.data, settings, audit: state.audit }));
+      delete state.ui.storageError;
+      return true;
+    } catch (e) {
+      state.ui.storageError = 'This browser could not save the workspace. Recent edits remain open in memory. Export an Excel or JSON backup before closing or reloading.';
+      return false;
+    }
   }
 
   /* ---------------- formatting ---------------- */
@@ -726,7 +731,7 @@
     $('#modeSeg').innerHTML = '<button data-action="mode" data-val="corrected" class="' + (state.settings.mode === 'corrected' ? 'on' : '') + '">Corrected</button><button data-action="mode" data-val="workbook" class="' + (state.settings.mode === 'workbook' ? 'on' : '') + '">As built</button>';
     const active = document.activeElement && document.activeElement.id;
     const main = $('#content');
-    main.innerHTML = VIEWS[view]();
+    main.innerHTML = (state.ui.storageError ? '<div class="banner bad" role="alert">' + esc(state.ui.storageError) + ' <a href="#data">Export a backup</a></div>' : '') + VIEWS[view]();
     const tools = $('#toolsRail');
     if (tools && shellUI) tools.innerHTML = shellUI.toolsMarkup();
     if (TMV.afterRender) TMV.afterRender();

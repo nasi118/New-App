@@ -84,7 +84,8 @@
         state.audit.push({ ts: new Date().toISOString(), by: 'you', path: 'tm', from: previous.data.tm.clients.length, to: next.data.tm.clients.length,
           note: (options && options.source || 'Workbook') + ' import applied after preview', noUndo: true });
         state.ui.walkCol = 0; state.ui.walkPanel = null; state.ui.sel = {}; invalidate();
-        api.compute(); save();
+        api.compute();
+        if (save() === false) throw new Error('Import was not applied because this browser could not save the workspace. Existing client records have been preserved. Export a backup and free browser storage before retrying.');
       } catch (exception) {
         state.data = previous.data; state.settings = previous.settings; state.audit = previous.audit; invalidate(); throw exception;
       }

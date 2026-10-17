@@ -66,3 +66,11 @@ test('import preview and failed calculations leave the whole workspace unchanged
   assert.throws(() => ui.prepare(incoming, 'bad.xlsx'));
   assert.deepEqual(state.data, before.data);
 });
+test('a storage failure rolls back imported clients, settings and history', () => {
+  const state = fixture(), before = clone(state);
+  const api = { state, esc: String, money: String, head: String, render() {}, toast() {}, save: () => false, invalidate() {}, go() {}, active: () => state.data.tm.clients[0], compute() {} };
+  const ui = DataUI(api), incoming = { data: clone(state.data), settings: clone(state.settings), audit: [] };
+  incoming.data.tm.clients[0].w2[0].wages += 1000;
+  assert.throws(() => ui.applyImportedState(incoming, { source: 'test.xlsx' }), /could not save/);
+  assert.deepEqual({ data: state.data, settings: state.settings, audit: state.audit }, { data: before.data, settings: before.settings, audit: before.audit });
+});

@@ -55,6 +55,9 @@ limits, SALT, QBI and AMT. Its year selector does not alter the client. The **Au
 trail** shows timestamp, client, actor, input, before/after values and reason;
 client filters and available Undo actions help review local changes. It is local
 application history, not independent audit verification.
+History is preserved across reloads without a fixed entry cap. If browser storage
+is unavailable or full, the app shows a backup prompt and rejects imports that
+cannot be saved, preserving the existing workspace.
 
 ### Excel, backups and Google Sheets
 

@@ -152,6 +152,11 @@ try {
   // Exercise an actual downloaded workbook, edited source cell, browser upload,
   // preview, and confirmed application. Unit tests independently read deflated XLSX.
   await go('data');
+  // Imported histories must survive reload beyond the former 500-entry cap.
+  await page.evaluate(() => {
+    const c = TMP.TMV.active(), index = TMP.state.data.tm.clients.indexOf(c);
+    for (let i = 0; i < 600; i++) TMP.state.audit.push({ ts: new Date(1700000000000 + i * 1000).toISOString(), by: 'you', path: 'tm.clients.' + index + '.w2.0.wages', clientId: c.id, clientName: c.info.name, recordYear: c.info.year, from: i, to: i + 1, note: 'Historical change ' + i, noUndo: true });
+  });
   const otherClients = await page.evaluate(() => TMP.state.data.tm.clients.filter(c => c.id !== TMP.state.data.tm.active));
   const exportedFile = await download('[data-action="workbook-export"]');
   const decoded = await Excel.decode(new Uint8Array(await fs.readFile(exportedFile)));
@@ -171,6 +176,10 @@ try {
   ok((await result()).agi === 132000, 'applying the reviewed Excel import recalculates the return from the edited cell');
   assert.deepEqual(await page.evaluate(() => TMP.state.data.tm.clients.filter(c => c.id !== TMP.state.data.tm.active)), otherClients);
   ok(true, 'client merge preserves all other client records');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.TMP?.state.view === 'data');
+  ok(await page.evaluate(() => TMP.state.audit.filter(a => /^Historical change /.test(a.note || '')).length === 600 && TMP.TMV.active().w2[0].wages === 130000),
+    'all imported audit history and source amounts survive reload beyond 500 events');
   const beforeInvalid = await page.evaluate(() => JSON.stringify({ data: TMP.state.data, audit: TMP.state.audit }));
   await page.locator('#tmWorkbookFile').setInputFiles({ name: 'invalid.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from('invalid workbook') });
   await page.locator('[role="alert"]').waitFor();
@@ -200,6 +209,23 @@ try {
   await page.keyboard.press('Escape');
   ok(!(await page.locator('#toolsRail').isVisible()), 'Escape closes the mobile tools panel');
   await page.screenshot({ path: path.join(output, 'dashboard-mobile.png'), fullPage: false });
+  await go('data');
+  await page.locator('#tmWorkbookFile').setInputFiles(editedFile);
+  await page.locator('[data-action="data-apply"]').waitFor();
+  const beforeStorageFailure = await page.evaluate(() => JSON.stringify({ data: TMP.state.data, audit: TMP.state.audit }));
+  await page.evaluate(() => {
+    window.testOriginalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'tax-master-planner.v2') throw new DOMException('Storage full', 'QuotaExceededError');
+      return window.testOriginalSetItem.call(this, key, value);
+    };
+  });
+  await page.locator('[data-action="data-apply"]').click();
+  ok(beforeStorageFailure === await page.evaluate(() => JSON.stringify({ data: TMP.state.data, audit: TMP.state.audit })),
+    'browser storage failure preserves the existing workspace during import');
+  ok((await page.locator('.main').innerText()).includes('Import was not applied because this browser could not save'),
+    'failed browser persistence displays an actionable import error');
+  await page.evaluate(() => { Storage.prototype.setItem = window.testOriginalSetItem; delete window.testOriginalSetItem; });
   ok(errors.length === 0, 'all integrated workflows have no browser runtime errors: ' + errors.join('; '));
   console.log(`\n${checks} workspace browser checks passed. Evidence: ${output}`);
 } finally { await browser.close(); }
